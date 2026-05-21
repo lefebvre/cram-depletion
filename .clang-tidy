@@ -1,0 +1,24 @@
+# clang-tidy configuration for cram-depletion.
+# Pragmatic check set: bug-prone patterns, core guidelines, performance,
+# readability — without the noisiest opinionated checks for a numerics codebase.
+Checks: >
+  -*,
+  bugprone-*,
+  cppcoreguidelines-*,
+  performance-*,
+  readability-*,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  -performance-enum-size,
+  -readability-magic-numbers,
+  -readability-braces-around-statements,
+  -bugprone-easily-swappable-parameters,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -readability-identifier-length,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-bounds-constant-array-index
+
+WarningsAsErrors: ''
+HeaderFilterRegex: 'cram/.*'
+FormatStyle: none

@@ -1,0 +1,105 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  format-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+      - name: clang-format --dry-run
+        run: |
+          clang-format --dry-run -Werror \
+            cram/*.hpp cram/*.cpp \
+            cram-apps/*.cpp \
+            tests/*.hpp tests/*.cpp \
+            tests/integration/*.cpp
+
+  build-test-coverage:
+    needs: format-check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libeigen3-dev libgtest-dev \
+                                   gcovr cppcheck clang-tidy
+
+      - name: Configure (Debug + coverage)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Coverage HTML + threshold (gcovr)
+        run: |
+          mkdir -p build/coverage-html
+          gcovr --root . --filter 'cram/' \
+                --exclude 'tests/' --exclude 'cram-apps/' \
+                --fail-under-line 95 --print-summary \
+                --html-details build/coverage-html/index.html \
+                --xml build/coverage-html/cobertura.xml
+
+      - name: Upload coverage HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: build/coverage-html
+
+  sanitizers:
+    needs: format-check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libeigen3-dev libgtest-dev
+      - name: Build + test with ASan/UBSan
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON
+          cmake --build build -j
+          ctest --test-dir build --output-on-failure
+
+  static-analysis:
+    needs: format-check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libeigen3-dev libgtest-dev cppcheck clang-tidy
+      - name: Configure (exports compile_commands.json)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+      - name: cppcheck
+        run: cmake --build build --target cppcheck
+      - name: clang-tidy
+        run: clang-tidy -p build cram/*.cpp
+
+  endftk-integration:
+    needs: format-check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libeigen3-dev libgtest-dev
+      - name: Build with ENDFtk reader (FetchContent pulls ENDFtk + deps)
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DWITH_ENDFTK=ON
+          cmake --build build -j
+      - name: Run integration tests against real ENDF data
+        run: ctest --test-dir build -R EndfReaderIntegration --output-on-failure

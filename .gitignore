@@ -1,0 +1,25 @@
+# Build directories
+build/
+build-*/
+cmake-build-*/
+
+# FetchContent cache (see FETCHCONTENT_BASE_DIR in CMakeLists.txt)
+external/
+
+# CMake artifacts
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+*.cmake.stamp
+
+# Coverage output
+coverage/
+*.gcda
+*.gcno
+*.gcov
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
