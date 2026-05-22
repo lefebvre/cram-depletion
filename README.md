@@ -1,5 +1,10 @@
 # cram-depletion
 
+[![CI](https://github.com/lefebvre/cram-depletion/actions/workflows/ci.yml/badge.svg)](https://github.com/lefebvre/cram-depletion/actions/workflows/ci.yml)
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)]()
+[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-yellow.svg)](LICENSE.md)
+[![codecov](https://codecov.io/gh/lefebvre/cram-depletion/graph/badge.svg)](https://codecov.io/gh/lefebvre/cram-depletion)
+
 A small C++20 CRAM (Chebyshev Rational Approximation Method) solver for the
 nuclear depletion / Bateman equations, with an optional ENDF/B-VIII data reader
 built on [njoy/ENDFtk](https://github.com/njoy/ENDFtk).
