@@ -15,4 +15,11 @@ if(WITH_ENDFTK)
   target_link_libraries(integration_test PRIVATE cram GTest::gtest_main)
   gtest_discover_tests(integration_test
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/integration)
+
+  # Pusa-2016 actinide validation: reads tapes fetched into
+  # ${PUSA_ACTINIDE_DATA_DIR} by cmake/FetchEndfActinides.cmake.
+  add_executable(pusa_actinide_test integration/test_pusa_2016_actinide.cpp)
+  target_link_libraries(pusa_actinide_test PRIVATE cram GTest::gtest_main)
+  gtest_discover_tests(pusa_actinide_test
+    WORKING_DIRECTORY ${PUSA_ACTINIDE_DATA_DIR})
 endif()

@@ -73,6 +73,9 @@ if(WITH_ENDFTK)
   FetchContent_MakeAvailable(ENDFtk)
   target_compile_definitions(cram PUBLIC WITH_ENDFTK)
   target_link_libraries(cram PUBLIC njoy::ENDFtk)
+
+  # Fetch ENDF/B-VIII.0 actinide tapes for the Pusa-2016 validation test.
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchEndfActinides.cmake)
 endif()
 
 # --- driver -----------------------------------------------------------------
