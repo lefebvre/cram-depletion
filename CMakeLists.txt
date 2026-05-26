@@ -50,6 +50,7 @@ add_library(cram
   cram/endf_reader.cpp)
 target_include_directories(cram PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(cram PUBLIC Eigen3::Eigen cram_quality_flags)
+target_compile_features(cram PUBLIC cxx_std_20)
 target_compile_options(cram PRIVATE -Wall -Wextra)
 
 if(ENABLE_CLANG_TIDY)

@@ -9,6 +9,7 @@
 //   dn/dt = A n  ,  n(t) = exp(A t) n(0).
 //
 #include <Eigen/SparseCore>
+#include <cstdint>
 #include <numbers>
 #include <optional>
 #include <unordered_map>
@@ -91,10 +92,10 @@ private:
 
   void decayTriplets(std::vector<Eigen::Triplet<double>>& t) const;
 
-  // Emit production triplets for the fission products of `parent` (using the
-  // yields nearest `energy`), each weighted by `rate` * yield.
+  // Emit production triplets for the given fission-yield set, each weighted by
+  // `rate` * yield. Caller is responsible for the parent-removal term.
   void emitFissionProducts(std::vector<Eigen::Triplet<double>>& t, int parentIndex,
-                           const Zai& parent, double rate, double energy) const;
+                           const FissionYields& yields, double rate) const;
 };
 
 }  // namespace cram
