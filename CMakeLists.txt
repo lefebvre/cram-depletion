@@ -27,6 +27,7 @@ endif()
 
 option(WITH_ENDFTK      "Build the ENDFtk-based data reader"        OFF)
 option(ENABLE_TESTS     "Build the unit tests"                      ON)
+option(ENABLE_BENCHMARKS "Build the Google Benchmark perf suite"    OFF)
 option(ENABLE_COVERAGE  "Instrument for code coverage (gcov/gcovr)" OFF)
 option(ENABLE_SANITIZERS "Build with Address + UB sanitizers"       OFF)
 option(ENABLE_CLANG_TIDY "Run clang-tidy during the build"          OFF)
@@ -93,6 +94,11 @@ if(ENABLE_TESTS)
     FetchContent_MakeAvailable(googletest)
   endif()
   add_subdirectory(tests)
+endif()
+
+# --- benchmarks -------------------------------------------------------------
+if(ENABLE_BENCHMARKS)
+  add_subdirectory(bench)
 endif()
 
 # --- coverage report target -------------------------------------------------
