@@ -47,6 +47,7 @@ endif()
 # --- core library -----------------------------------------------------------
 add_library(cram
   cram/cram.cpp
+  cram/cram_solver.cpp
   cram/burnup_matrix.cpp
   cram/endf_reader.cpp)
 target_include_directories(cram PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

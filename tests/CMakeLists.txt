@@ -1,7 +1,8 @@
 add_executable(unit_tests
   test_nuclide.cpp
   test_chain.cpp
-  test_cram.cpp)
+  test_cram.cpp
+  test_cram_solver.cpp)
 
 target_include_directories(unit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(unit_tests PRIVATE cram cram_quality_flags GTest::gtest_main)
