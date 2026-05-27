@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
+
 #include "cram/nuclide.hpp"
 
 using namespace cram;
@@ -47,6 +49,11 @@ TEST(DecaySequence, MultiParticle) {
   EXPECT_EQ(decayParticleSequence(1.4), (std::vector<int>{1, 4}));  // beta- , alpha
   EXPECT_EQ(decayParticleSequence(2.7), (std::vector<int>{2, 7}));  // EC , proton
   EXPECT_EQ(decayParticleSequence(1.55), (std::vector<int>{1, 5, 5}));
+}
+
+TEST(DecaySequence, NegativeRtypIsEmpty) {
+  EXPECT_TRUE(decayParticleSequence(-1.0).empty());
+  EXPECT_TRUE(decayParticleSequence(std::nan("")).empty());
 }
 
 // ---------------------------------------------------------------------------
