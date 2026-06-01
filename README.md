@@ -20,6 +20,9 @@ cram/chain.hpp           DepletionChain: nuclides, decay data, fission yields
 cram/cram.hpp            CRAM solver interface
 cram/cram.cpp            IPF-CRAM-16 / CRAM-48 (verified coefficients)
 cram/burnup_matrix.cpp   matrix assembly (decay, fission source, reactions)
+cram/integrator.hpp      time integrators (predictor, CE/CM, CE/LI, LE/QI, CF4)
+cram/deplete.hpp         constant-power depletion system (fixed one-group XS)
+cram/chain_xml.cpp       OpenMC depletion_chain XML reader (via pugixml)
 cram/endf_reader.cpp     ENDFtk ingestion (optional, see notes)
 cram-apps/deplete.cpp    runnable demo + ENDF driver
 cmake/gcov_to_lcov.py    gcov JSON -> LCOV tracefile (consumed by VS Code)
@@ -89,8 +92,39 @@ tests/bateman.hpp        analytic Bateman references
 tests/test_nuclide.cpp   ZAI packing, RTYP decode, decay-mode -> daughter
 tests/test_chain.cpp     registration, decay/yield data, matrix assembly
 tests/test_cram.cpp      CRAM16/CRAM48 vs analytic; mass, stiffness, edge cases
+tests/test_integrator.cpp  integrator order-of-accuracy + constant-A exactness
+tests/test_deplete.cpp     constant-power flux normalization + assembly
+tests/test_chain_xml.cpp   OpenMC depletion_chain parsing
+tests/validation/        guarded replay vs OpenMC-generated VERA pin data
 tests/integration/       real ENDFtk reader vs real ENDF data (WITH_ENDFTK only)
 ```
+
+## Validation against OpenMC (VERA depletion benchmark)
+
+The depletion engine mirrors the validation approach of OpenMC's depletion
+module (Yu & Forget, *Ann. Nucl. Energy* 170 (2022) 108973, which verifies
+OpenMC against the VERA depletion benchmark). Two layers, both transport-free:
+
+1. **Integrator order-of-accuracy** (`tests/test_integrator.cpp`, always in CI).
+   The predictor / CE-CM / CE-LI / LE-QI / CF4 integrators (`cram/integrator.hpp`,
+   coefficients matching OpenMC's `openmc.deplete`) are marched over a
+   constant-power pin problem at refining time steps; the observed convergence
+   orders (≈1 predictor, ≈2 CE/CM·CE/LI·LE/QI, ≈4 CF4) reproduce the paper's
+   §4.5 / Figs 15–18. When the flux is held fixed (`A` constant) every scheme
+   collapses to the exact `exp(A·dt)`, which is also checked.
+
+2. **Engine reproduction of OpenMC** (`tests/validation/`). OpenMC runs a
+   fixed-cross-section VERA pin depletion (ENDF/B-VIII.0, simplified CASL chain)
+   with its predictor; given the same chain + one-group micro cross sections +
+   flux, this engine's predictor march reproduces OpenMC's number densities to
+   **< 1e-3** for every benchmark nuclide of interest (U/Np/Pu/Am isotopes,
+   Xe-135, Cs-137, Nd-148, Sm-149, Gd-157 — the major ones to ~1e-5). This
+   checks matrix assembly + CRAM, isolated from the transport / cross-section
+   error a transport-free engine cannot reproduce. The committed reference data
+   for case `vera_pin1a` lives under `tests/validation/data/`; regenerate or add
+   cases offline with [validation/openmc/generate_vera_pin.py](validation/openmc/).
+   The test SKIPs (never fails) when the data directory is absent, so a clean
+   checkout without it still passes.
 
 ## How CRAM works here
 
@@ -131,8 +165,8 @@ OpenMC (MIT license) and were checked against analytic Bateman solutions to
 
 ## Possible next steps
 
-- Predictor-corrector time integration (CE/CM, LE/QI) for coupling to a flux
-  solver, so the matrix is rebuilt as the spectrum/number densities change.
+- The stochastic-implicit (SI-CE/LI, SI-LE/QI) and EPC-RK4 integrators from the
+  OpenMC set, for Xe-stability on very large systems.
 - One-group collapse of MF3 cross sections (or ACE data) to get reaction rates
   for `(n,γ)`, `(n,2n)`, fission, etc.
 - A sparsity-preserving ordering / reuse of the symbolic factorization across

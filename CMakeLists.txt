@@ -25,6 +25,20 @@ if(NOT Eigen3_FOUND)
   FetchContent_MakeAvailable(eigen)
 endif()
 
+# pugixml: small, dependency-free XML parser used to read OpenMC depletion_chain
+# files. Fetched if not found system-wide.
+find_package(pugixml 1.12 QUIET)
+if(NOT pugixml_FOUND)
+  include(FetchContent)
+  FetchContent_Declare(pugixml
+    GIT_REPOSITORY https://github.com/zeux/pugixml.git
+    GIT_TAG        v1.14
+    GIT_SHALLOW    TRUE
+    EXCLUDE_FROM_ALL
+    SYSTEM)
+  FetchContent_MakeAvailable(pugixml)
+endif()
+
 option(WITH_ENDFTK      "Build the ENDFtk-based data reader"        OFF)
 option(ENABLE_TESTS     "Build the unit tests"                      ON)
 option(ENABLE_BENCHMARKS "Build the Google Benchmark perf suite"    OFF)
@@ -49,9 +63,12 @@ add_library(cram
   cram/cram.cpp
   cram/cram_solver.cpp
   cram/burnup_matrix.cpp
+  cram/integrator.cpp
+  cram/deplete.cpp
+  cram/chain_xml.cpp
   cram/endf_reader.cpp)
 target_include_directories(cram PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(cram PUBLIC Eigen3::Eigen cram_quality_flags)
+target_link_libraries(cram PUBLIC Eigen3::Eigen cram_quality_flags PRIVATE pugixml::pugixml)
 target_compile_features(cram PUBLIC cxx_std_20)
 target_compile_options(cram PRIVATE -Wall -Wextra)
 

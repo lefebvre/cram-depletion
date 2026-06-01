@@ -90,6 +90,33 @@ void DepletionChain::emitFissionProducts(std::vector<Eigen::Triplet<double>>& t,
   }
 }
 
+// Emit the production triplet(s) for one decay mode of `parent` (matrix index
+// `i`) at the given branch `rate`. Removal of the parent is handled by the
+// caller's diagonal term.
+void DepletionChain::emitDecayMode(std::vector<Eigen::Triplet<double>>& t, const Zai& parent, int i,
+                                   const DecayMode& m, double rate) const {
+  if (m.isFission) {
+    if (const FissionYields* y = nearestYields(parent, 0.0))
+      emitFissionProducts(t, i, *y, rate);  // spontaneous fission
+    return;
+  }
+
+  Zai daughter;
+  if (m.hasDaughter) {
+    daughter = m.daughter;
+  } else {
+    bool fission = false;
+    daughter = applyDecay(parent, m.rtyp, m.finalState, fission);
+    if (fission)
+      return;
+  }
+  int j = indexOf(daughter);
+  if (j >= 0)
+    t.emplace_back(j, i, rate);
+  // If j < 0 the daughter wasn't registered; production is dropped.
+  // Register all reachable daughters when building the chain to avoid this.
+}
+
 void DepletionChain::decayTriplets(std::vector<Eigen::Triplet<double>>& t) const {
   for (const auto& [key, d] : decay_) {
     if (d.decayConstant == 0.0)
@@ -104,24 +131,8 @@ void DepletionChain::decayTriplets(std::vector<Eigen::Triplet<double>>& t) const
 
     for (const auto& m : d.modes) {
       double rate = d.decayConstant * m.branching;
-      if (rate == 0.0)
-        continue;
-
-      if (m.isFission) {
-        if (const FissionYields* y = nearestYields(parent, 0.0))
-          emitFissionProducts(t, i, *y, rate);  // spontaneous fission
-        continue;
-      }
-
-      bool fission = false;
-      Zai daughter = applyDecay(parent, m.rtyp, m.finalState, fission);
-      if (fission)
-        continue;
-      int j = indexOf(daughter);
-      if (j >= 0)
-        t.emplace_back(j, i, rate);
-      // If j < 0 the daughter wasn't registered; production is dropped.
-      // Register all reachable daughters when building the chain to avoid this.
+      if (rate != 0.0)
+        emitDecayMode(t, parent, i, m, rate);
     }
   }
 }

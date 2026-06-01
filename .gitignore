@@ -23,3 +23,9 @@ coverage/
 .idea/
 .DS_Store
 *.swp
+
+# Clangd cache
+.cache/
+
+# python files
+*.pyc

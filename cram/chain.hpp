@@ -27,6 +27,12 @@ struct DecayMode {
   double branching = 0.0;  // branching ratio for this mode (sum over modes ~ 1)
   int finalState = 0;      // RFS: isomeric state of the daughter
   bool isFission = false;  // spontaneous fission -> products from SFY table
+  // Optional explicit daughter. When hasDaughter is true (and isFission is
+  // false) the daughter below is used directly instead of deriving it from
+  // rtyp via applyDecay(). This lets readers that already carry an explicit
+  // target (e.g. an OpenMC depletion_chain XML) honor it exactly.
+  bool hasDaughter = false;
+  Zai daughter{};
 };
 
 // Per-nuclide decay information.
@@ -91,6 +97,11 @@ private:
   std::unordered_map<std::int64_t, std::vector<FissionYields>> nfy_;
 
   void decayTriplets(std::vector<Eigen::Triplet<double>>& t) const;
+
+  // Emit production triplet(s) for one decay mode of `parent` (index `i`) at
+  // the given branch rate. The parent-removal diagonal is the caller's job.
+  void emitDecayMode(std::vector<Eigen::Triplet<double>>& t, const Zai& parent, int i,
+                     const DecayMode& m, double rate) const;
 
   // Emit production triplets for the given fission-yield set, each weighted by
   // `rate` * yield. Caller is responsible for the parent-removal term.
