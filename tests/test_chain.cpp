@@ -189,6 +189,31 @@ TEST(Reactions, FissionSourceWeightsByYield) {
   EXPECT_NEAR(M.coeff(c.indexOf(P2), c.indexOf(U)), 2.0 * 0.061, 1e-15);
 }
 
+TEST(Reactions, AddReactionEarlyReturns) {
+  DepletionChain c;
+  const Zai A{92, 235, 0}, B{92, 236, 0}, X{99, 999, 0};  // X never registered
+  c.add(A);
+  c.add(B);
+  std::vector<Eigen::Triplet<double>> t;
+
+  c.addReaction(t, A, X, 1.0);  // unregistered product
+  c.addReaction(t, X, A, 1.0);  // unregistered parent
+  c.addReaction(t, A, B, 0.0);  // zero rate
+  EXPECT_TRUE(t.empty());
+}
+
+TEST(Reactions, AddFissionSourceEarlyReturns) {
+  DepletionChain c;
+  const Zai U{92, 235, 0}, Z{99, 999, 0};
+  c.add(U);
+  std::vector<Eigen::Triplet<double>> t;
+
+  c.addFissionSource(t, Z, 1.0, 0.0253);  // unregistered parent
+  c.addFissionSource(t, U, 0.0, 0.0253);  // zero rate
+  c.addFissionSource(t, U, 1.0, 0.0253);  // registered, but no yields supplied
+  EXPECT_TRUE(t.empty());
+}
+
 TEST(Reactions, FinalizeSumsDuplicateTriplets) {
   DepletionChain c;
   c.add({1, 1, 0});
@@ -222,6 +247,33 @@ TEST(DecayMatrix, SpontaneousFissionWithoutYieldsJustRemoves) {
   for (int r = 0; r < M.rows(); ++r)
     col += M.coeff(r, i);
   EXPECT_NEAR(col, -lam, 1e-20);  // mass leaves the tracked system
+}
+
+// A nuclide that was registered with setDecay() but is stable (halfLife=0)
+// must be skipped during matrix assembly without producing a diagonal entry.
+TEST(DecayMatrix, ExplicitlyStableNuclideContributesNothing) {
+  DepletionChain c;
+  const Zai S{2, 4, 0};  // 4He, stable, registered via setDecay
+  c.setDecay(S, DecayData{/*halfLife=*/0.0, 0.0, {}});
+  auto M = c.decayMatrix();
+  EXPECT_EQ(M.nonZeros(), 0);
+}
+
+// A non-fission mode whose RTYP sequence still encodes fission (e.g. beta-
+// followed by spontaneous fission, RTYP 1.6) must drop the production term
+// rather than try to apply a meaningless daughter.
+TEST(DecayMatrix, FissionInMultiStepRtypIsSkipped) {
+  DepletionChain c;
+  const Zai parent{92, 238, 0}, dummy{93, 238, 0};
+  c.add(parent);
+  c.add(dummy);
+  // isFission=false but RTYP contains code 6 -> applyDecay flags fission
+  // and the production triplet must be omitted.
+  c.setDecay(parent, DecayData{1.0e9, 0.0, {DecayMode{1.6, 1.0, 0, false}}});
+  auto M = c.decayMatrix();
+  EXPECT_NEAR(M.coeff(c.indexOf(parent), c.indexOf(parent)), -(kLn2 / 1.0e9), 1e-20);
+  // No production of the would-be daughter, since fission was encoded.
+  EXPECT_EQ(M.nonZeros(), 1);
 }
 
 // A daughter that was never registered in the chain has its production term

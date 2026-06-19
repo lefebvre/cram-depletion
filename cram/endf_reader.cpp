@@ -33,6 +33,8 @@ int loadFissionYields(DepletionChain& /*chain*/, const std::string& /*path*/, bo
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace cram {
@@ -118,6 +120,11 @@ int loadFissionYields(DepletionChain& chain, const std::string& path, bool useCu
         auto fps = toVector(block.isomericStates());
         auto yld = toVector(block.fissionYieldValues());
 
+        if (zafp.size() != yld.size() || fps.size() != yld.size())
+          throw std::runtime_error(
+              "cram: ENDF MT454/459 yield columns (ZAFP/FPS/Y) have mismatched sizes");
+
+        fy.products.reserve(yld.size());
         for (std::size_t k = 0; k < yld.size(); ++k) {
           Zai prod = zaiFromZA(static_cast<int>(std::lround(zafp[k])),
                                static_cast<int>(std::lround(fps[k])));

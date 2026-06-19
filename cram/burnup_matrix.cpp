@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <utility>
 
 namespace cram {
 
@@ -72,18 +74,16 @@ void DepletionChain::addFissionSource(std::vector<Eigen::Triplet<double>>& t, co
   int ip = indexOf(parent);
   if (ip < 0 || fissionRate == 0.0)
     return;
-  if (nearestYields(parent, energy) == nullptr)
-    return;
-  t.emplace_back(ip, ip, -fissionRate);  // parent consumed by fission
-  emitFissionProducts(t, ip, parent, fissionRate, energy);
-}
-
-void DepletionChain::emitFissionProducts(std::vector<Eigen::Triplet<double>>& t, int parentIndex,
-                                         const Zai& parent, double rate, double energy) const {
   const FissionYields* y = nearestYields(parent, energy);
   if (y == nullptr)
     return;
-  for (const auto& [prod, yield] : y->products) {
+  t.emplace_back(ip, ip, -fissionRate);  // parent consumed by fission
+  emitFissionProducts(t, ip, *y, fissionRate);
+}
+
+void DepletionChain::emitFissionProducts(std::vector<Eigen::Triplet<double>>& t, int parentIndex,
+                                         const FissionYields& yields, double rate) const {
+  for (const auto& [prod, yield] : yields.products) {
     int j = indexOf(prod);
     if (j >= 0)
       t.emplace_back(j, parentIndex, rate * yield);
@@ -108,7 +108,8 @@ void DepletionChain::decayTriplets(std::vector<Eigen::Triplet<double>>& t) const
         continue;
 
       if (m.isFission) {
-        emitFissionProducts(t, i, parent, rate, 0.0);  // spontaneous fission
+        if (const FissionYields* y = nearestYields(parent, 0.0))
+          emitFissionProducts(t, i, *y, rate);  // spontaneous fission
         continue;
       }
 
@@ -127,6 +128,16 @@ void DepletionChain::decayTriplets(std::vector<Eigen::Triplet<double>>& t) const
 
 Eigen::SparseMatrix<double> DepletionChain::decayMatrix() const {
   std::vector<Eigen::Triplet<double>> t;
+  // Each decaying nuclide contributes a diagonal term plus one production
+  // triplet per decay mode (spontaneous-fission modes add more, but those are
+  // a small minority — this is just a sizing hint).
+  std::size_t estimate = 0;
+  for (const auto& [_, d] : decay_) {
+    if (d.decayConstant == 0.0)
+      continue;
+    estimate += 1 + d.modes.size();
+  }
+  t.reserve(estimate);
   decayTriplets(t);
   return finalize(std::move(t));
 }

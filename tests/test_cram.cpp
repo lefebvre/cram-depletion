@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <stdexcept>
 #include <vector>
 
 #include "bateman.hpp"
@@ -143,6 +144,18 @@ TEST(Cram, StiffSystemRemainsAccurate) {
   EXPECT_TRUE(n.allFinite());
   expectClose(n, ref, 1e-6, 1e-9);  // looser: stiff
   EXPECT_NEAR(n.sum(), 1.0, 1e-10);
+}
+
+TEST(Cram, InvalidShapeThrows) {
+  Eigen::SparseMatrix<double> nonsquare(2, 3);
+  Eigen::VectorXd n0(2);
+  n0 << 1.0, 2.0;
+  EXPECT_THROW(cramSolve(nonsquare, n0, 1.0, CramOrder::CRAM48), std::invalid_argument);
+
+  Eigen::SparseMatrix<double> square(3, 3);
+  Eigen::VectorXd mismatched(2);
+  mismatched << 1.0, 2.0;
+  EXPECT_THROW(cramSolve(square, mismatched, 1.0, CramOrder::CRAM48), std::invalid_argument);
 }
 
 TEST(Cram, Orders16And48Agree) {

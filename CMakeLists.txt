@@ -27,6 +27,7 @@ endif()
 
 option(WITH_ENDFTK      "Build the ENDFtk-based data reader"        OFF)
 option(ENABLE_TESTS     "Build the unit tests"                      ON)
+option(ENABLE_BENCHMARKS "Build the Google Benchmark perf suite"    OFF)
 option(ENABLE_COVERAGE  "Instrument for code coverage (gcov/gcovr)" OFF)
 option(ENABLE_SANITIZERS "Build with Address + UB sanitizers"       OFF)
 option(ENABLE_CLANG_TIDY "Run clang-tidy during the build"          OFF)
@@ -46,10 +47,12 @@ endif()
 # --- core library -----------------------------------------------------------
 add_library(cram
   cram/cram.cpp
+  cram/cram_solver.cpp
   cram/burnup_matrix.cpp
   cram/endf_reader.cpp)
 target_include_directories(cram PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(cram PUBLIC Eigen3::Eigen cram_quality_flags)
+target_compile_features(cram PUBLIC cxx_std_20)
 target_compile_options(cram PRIVATE -Wall -Wextra)
 
 if(ENABLE_CLANG_TIDY)
@@ -92,6 +95,11 @@ if(ENABLE_TESTS)
     FetchContent_MakeAvailable(googletest)
   endif()
   add_subdirectory(tests)
+endif()
+
+# --- benchmarks -------------------------------------------------------------
+if(ENABLE_BENCHMARKS)
+  add_subdirectory(bench)
 endif()
 
 # --- coverage report target -------------------------------------------------

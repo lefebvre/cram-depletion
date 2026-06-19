@@ -3,8 +3,8 @@
 // Nuclide identity (Z, A, isomeric state) and the ENDF decay-mode
 // transition rules needed to figure out the daughter of a decay.
 //
+#include <cmath>
 #include <cstdint>
-#include <format>
 #include <functional>
 #include <string>
 #include <vector>
@@ -57,16 +57,32 @@ enum class DecayParticle {
 //   2.7  -> EC/beta+ followed by proton
 // Returns the ordered list of single-digit codes.
 inline std::vector<int> decayParticleSequence(double rtyp) {
-  std::string s = std::format("{:.8g}", rtyp);
   std::vector<int> seq;
-  auto dot = s.find('.');
-  std::string ip = (dot == std::string::npos) ? s : s.substr(0, dot);
-  if (!ip.empty())
-    seq.push_back(std::stoi(ip));
-  if (dot != std::string::npos)
-    for (char c : s.substr(dot + 1))
-      if (c >= '0' && c <= '9')
-        seq.push_back(c - '0');
+  if (!(rtyp >= 0.0))
+    return seq;
+  // Scale by 1e8 (the precision the rest of ENDF uses for similar fields) and
+  // decode digit-by-digit. llround absorbs the FP noise of values like 1.55
+  // (1.5499999999999998 in IEEE 754).
+  constexpr std::int64_t kScale = 100000000;  // 10^8
+  const std::int64_t scaled = std::llround(rtyp * static_cast<double>(kScale));
+  const std::int64_t ipart = scaled / kScale;
+  seq.push_back(static_cast<int>(ipart));
+  std::int64_t frac = scaled - ipart * kScale;
+  if (frac == 0)
+    return seq;
+  // Count trailing zeros so 1.5 yields {1, 5} (not {1, 5, 0, 0, ...}) while
+  // 1.04 still yields {1, 0, 4}.
+  int trailingZeros = 0;
+  for (std::int64_t f = frac; f % 10 == 0; f /= 10)
+    ++trailingZeros;
+  const int digitsToEmit = 8 - trailingZeros;
+  std::int64_t divisor = kScale / 10;  // 10^7
+  for (int k = 0; k < digitsToEmit; ++k) {
+    const int d = static_cast<int>(frac / divisor);
+    seq.push_back(d);
+    frac -= static_cast<std::int64_t>(d) * divisor;
+    divisor /= 10;
+  }
   return seq;
 }
 
