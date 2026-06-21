@@ -31,9 +31,10 @@ struct DecayMode {
 
 // Per-nuclide decay information.
 struct DecayData {
-  double halfLife = 0.0;         // seconds; 0 or inf => stable
-  double decayConstant = 0.0;    // ln(2)/halfLife; 0 if stable
-  std::vector<DecayMode> modes;  // empty if stable
+  double halfLife = 0.0;             // seconds; 0 or inf => stable
+  double decayConstant = 0.0;        // ln(2)/halfLife; 0 if stable
+  double gammaEnergyPerDecay = 0.0;  // average EM (gamma+X-ray) energy per decay [eV]
+  std::vector<DecayMode> modes;      // empty if stable
 };
 
 // Independent fission yields for one parent at one incident energy.

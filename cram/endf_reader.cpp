@@ -75,6 +75,13 @@ int loadDecayData(DepletionChain& chain, const std::string& path) {
     d.halfLife = section.halfLife()[0];  // {value, uncertainty}
 
     if (!section.isStable()) {
+      // Average electromagnetic (gamma + X-ray) energy per decay [eV] from the
+      // MT457 average-decay-energies record (decayEnergies()[1] = {value, unc}).
+      // This is the line-integrated gamma energy that drives the deposited dose.
+      const auto& ade = section.averageDecayEnergies();
+      if (ade.numberDecayEnergies() >= 2) {
+        d.gammaEnergyPerDecay = static_cast<double>(*ade.electromagneticDecayEnergy().begin());
+      }
       for (const auto& mode : section.decayModes().decayModes()) {
         DecayMode m;
         m.rtyp = mode.decayChain();                                  // RTYP
