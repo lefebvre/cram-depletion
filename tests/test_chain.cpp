@@ -138,6 +138,29 @@ TEST(DecayMatrix, ConservativeChainHasZeroColumnSums) {
   }
 }
 
+// close() registers every reachable daughter so production is never dropped. Here
+// Cs-135 (Xe-135's daughter) is absent until close() adds it, after which the decay
+// matrix conserves atoms (zero column sums). Idempotent on an already-closed chain.
+TEST(Chain, CloseRegistersDaughtersAndRestoresConservation) {
+  DepletionChain c;
+  const Zai A{53, 135, 0}, B{54, 135, 0};  // I-135 -> Xe-135 -> Cs-135
+  c.setDecay(A, DecayData{100.0, 0.0, {DecayMode{1.0, 1.0, 0, false}}});
+  c.setDecay(B, DecayData{300.0, 0.0, {DecayMode{1.0, 1.0, 0, false}}});
+  EXPECT_EQ(c.indexOf({55, 135, 0}), -1);  // daughter absent -> would be dropped
+
+  EXPECT_EQ(c.close(), 1);  // Cs-135 registered
+  EXPECT_GE(c.indexOf({55, 135, 0}), 0);
+  EXPECT_EQ(c.close(), 0);  // idempotent
+
+  auto M = c.decayMatrix();
+  for (int col = 0; col < M.cols(); ++col) {
+    double s = 0.0;
+    for (int row = 0; row < M.rows(); ++row)
+      s += M.coeff(row, col);
+    EXPECT_NEAR(s, 0.0, 1e-14) << "column " << col;
+  }
+}
+
 TEST(DecayMatrix, SpontaneousFissionFeedsYields) {
   DepletionChain c;
   const Zai Cf{98, 252, 0}, P1{54, 140, 0}, P2{44, 108, 0};

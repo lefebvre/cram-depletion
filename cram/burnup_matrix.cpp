@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
 #include <limits>
 #include <utility>
+#include <vector>
 
 namespace cram {
 
@@ -41,6 +44,36 @@ void DepletionChain::addFissionYields(const Zai& parent, FissionYields y) {
 const DecayData* DepletionChain::decay(const Zai& z) const {
   auto it = decay_.find(z.key());
   return it == decay_.end() ? nullptr : &it->second;
+}
+
+int DepletionChain::close() {
+  // Snapshot the decaying-nuclide keys first: add() below mutates nuclides_/index_
+  // (not decay_), and daughters added here carry no decay data, so one pass closes
+  // the chain. Mirrors the daughter derivation in decayTriplets().
+  std::vector<std::int64_t> parents;
+  parents.reserve(decay_.size());
+  for (const auto& [key, d] : decay_) {
+    if (d.decayConstant != 0.0)
+      parents.push_back(key);
+  }
+  int added = 0;
+  for (std::int64_t key : parents) {
+    Zai parent;
+    parent.z = static_cast<int>(key / 10000);
+    parent.a = static_cast<int>((key / 10) % 1000);
+    parent.i = static_cast<int>(key % 10);
+    for (const DecayMode& m : decay_.at(key).modes) {
+      if (m.isFission)
+        continue;  // fission products come from the SFY/NFY tables, not one daughter
+      bool fission = false;
+      Zai daughter = applyDecay(parent, m.rtyp, m.finalState, fission);
+      if (fission || indexOf(daughter) >= 0)
+        continue;
+      add(daughter);  // bare stable terminator -> production is never dropped
+      ++added;
+    }
+  }
+  return added;
 }
 
 const FissionYields* DepletionChain::nearestYields(const Zai& parent, double energy) const {
@@ -91,6 +124,7 @@ void DepletionChain::emitFissionProducts(std::vector<Eigen::Triplet<double>>& t,
 }
 
 void DepletionChain::decayTriplets(std::vector<Eigen::Triplet<double>>& t) const {
+  int dropped = 0;  // daughters not registered -> production lost (chain not closed)
   for (const auto& [key, d] : decay_) {
     if (d.decayConstant == 0.0)
       continue;
@@ -120,9 +154,18 @@ void DepletionChain::decayTriplets(std::vector<Eigen::Triplet<double>>& t) const
       int j = indexOf(daughter);
       if (j >= 0)
         t.emplace_back(j, i, rate);
-      // If j < 0 the daughter wasn't registered; production is dropped.
-      // Register all reachable daughters when building the chain to avoid this.
+      else
+        ++dropped;  // unregistered daughter; surfaced below instead of silently lost
     }
+  }
+  // Do not fail silently: a non-zero count means the chain was not closed and the
+  // decay matrix does not conserve atoms. Call DepletionChain::close() beforehand.
+  if (dropped > 0) {
+    std::fprintf(stderr,
+                 "cram: WARNING - %d decay daughter(s) not registered; their production "
+                 "is dropped and the decay matrix will not conserve atoms. "
+                 "Call DepletionChain::close() before building the matrix.\n",
+                 dropped);
   }
 }
 

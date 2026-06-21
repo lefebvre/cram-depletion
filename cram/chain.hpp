@@ -62,6 +62,12 @@ public:
   // Independent yields for `parent` at the energy nearest to `energy` [eV].
   const FissionYields* nearestYields(const Zai& parent, double energy) const;
 
+  // Register every reachable decay daughter not already in the chain, so matrix
+  // assembly can never silently drop a daughter's production. Added daughters
+  // carry no decay data (stable terminators). Returns the number added; 0 means
+  // the chain was already closed. Idempotent.
+  int close();
+
   // --- Matrix assembly -----------------------------------------------------
 
   // Pure radioactive decay (+ spontaneous fission if SFY were supplied as
