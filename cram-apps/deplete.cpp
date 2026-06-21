@@ -27,8 +27,8 @@ static void demo() {
   chain.add(Xe135);
   chain.add(Cs135);  // treated as stable here
 
-  chain.setDecay(I135, DecayData{thalf_I, 0.0, {DecayMode{1.0, 1.0, 0, false}}});
-  chain.setDecay(Xe135, DecayData{thalf_Xe, 0.0, {DecayMode{1.0, 1.0, 0, false}}});
+  chain.setDecay(I135, DecayData{.halfLife = thalf_I, .modes = {DecayMode{1.0, 1.0, 0, false}}});
+  chain.setDecay(Xe135, DecayData{.halfLife = thalf_Xe, .modes = {DecayMode{1.0, 1.0, 0, false}}});
 
   auto A = chain.decayMatrix();
 

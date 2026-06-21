@@ -33,7 +33,7 @@ TEST(Chain, IndexOfAbsent) {
 // ---------------------------------------------------------------------------
 TEST(Chain, DecayConstantFromHalfLife) {
   DepletionChain c;
-  c.setDecay({54, 135, 0}, DecayData{/*halfLife=*/100.0, 0.0, {}});
+  c.setDecay({54, 135, 0}, DecayData{.halfLife = 100.0});
   const DecayData* d = c.decay({54, 135, 0});
   ASSERT_NE(d, nullptr);
   EXPECT_NEAR(d->decayConstant, kLn2 / 100.0, 1e-15);
@@ -41,9 +41,10 @@ TEST(Chain, DecayConstantFromHalfLife) {
 
 TEST(Chain, StableNuclideHasZeroDecayConstant) {
   DepletionChain c;
-  c.setDecay({2, 4, 0}, DecayData{/*halfLife=*/0.0, 999.0, {}});  // bogus input constant
+  c.setDecay({2, 4, 0},
+             DecayData{.halfLife = 0.0, .decayConstant = 999.0});  // bogus input constant
   EXPECT_EQ(c.decay({2, 4, 0})->decayConstant, 0.0);
-  c.setDecay({1, 1, 0}, DecayData{std::numeric_limits<double>::infinity(), 0.0, {}});
+  c.setDecay({1, 1, 0}, DecayData{.halfLife = std::numeric_limits<double>::infinity()});
   EXPECT_EQ(c.decay({1, 1, 0})->decayConstant, 0.0);
 }
 
@@ -90,7 +91,7 @@ TEST(DecayMatrix, SingleDecayEntries) {
   const Zai A{53, 135, 0}, B{54, 135, 0};
   c.add(A);
   c.add(B);
-  c.setDecay(A, DecayData{100.0, 0.0, {DecayMode{1.0, 1.0, 0, false}}});  // A -> B
+  c.setDecay(A, DecayData{.halfLife = 100.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});  // A -> B
 
   auto M = c.decayMatrix();
   const double lam = kLn2 / 100.0;
@@ -107,8 +108,8 @@ TEST(DecayMatrix, BranchingSplitsByRatio) {
   c.add(B);
   c.add(D);
   // beta- (Z+1 -> B) with BR 0.7 ; neutron emission (A-1 -> D) with BR 0.3
-  c.setDecay(A,
-             DecayData{10.0, 0.0, {DecayMode{1.0, 0.7, 0, false}, DecayMode{5.0, 0.3, 0, false}}});
+  c.setDecay(A, DecayData{.halfLife = 10.0,
+                          .modes = {DecayMode{1.0, 0.7, 0, false}, DecayMode{5.0, 0.3, 0, false}}});
 
   auto M = c.decayMatrix();
   const double lam = kLn2 / 10.0;
@@ -126,8 +127,8 @@ TEST(DecayMatrix, ConservativeChainHasZeroColumnSums) {
   c.add(A);
   c.add(B);
   c.add(D);
-  c.setDecay(A, DecayData{100.0, 0.0, {DecayMode{1.0, 1.0, 0, false}}});
-  c.setDecay(B, DecayData{300.0, 0.0, {DecayMode{1.0, 1.0, 0, false}}});
+  c.setDecay(A, DecayData{.halfLife = 100.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});
+  c.setDecay(B, DecayData{.halfLife = 300.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});
 
   auto M = c.decayMatrix();
   for (int col = 0; col < M.cols(); ++col) {
@@ -144,8 +145,8 @@ TEST(DecayMatrix, ConservativeChainHasZeroColumnSums) {
 TEST(Chain, CloseRegistersDaughtersAndRestoresConservation) {
   DepletionChain c;
   const Zai A{53, 135, 0}, B{54, 135, 0};  // I-135 -> Xe-135 -> Cs-135
-  c.setDecay(A, DecayData{100.0, 0.0, {DecayMode{1.0, 1.0, 0, false}}});
-  c.setDecay(B, DecayData{300.0, 0.0, {DecayMode{1.0, 1.0, 0, false}}});
+  c.setDecay(A, DecayData{.halfLife = 100.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});
+  c.setDecay(B, DecayData{.halfLife = 300.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});
   EXPECT_EQ(c.indexOf({55, 135, 0}), -1);  // daughter absent -> would be dropped
 
   EXPECT_EQ(c.close(), 1);  // Cs-135 registered
@@ -170,7 +171,7 @@ TEST(DecayMatrix, SpontaneousFissionFeedsYields) {
   sfy.products = {{P1, 1.2}, {P2, 0.8}};
   c.addFissionYields(Cf, sfy);
   // single SF branch, branching 1.0
-  c.setDecay(Cf, DecayData{8.3e8, 0.0, {DecayMode{6.0, 1.0, 0, true}}});
+  c.setDecay(Cf, DecayData{.halfLife = 8.3e8, .modes = {DecayMode{6.0, 1.0, 0, true}}});
 
   auto M = c.decayMatrix();
   const double lam = kLn2 / 8.3e8;
@@ -261,7 +262,7 @@ TEST(DecayMatrix, SpontaneousFissionWithoutYieldsJustRemoves) {
   DepletionChain c;
   const Zai Cm{96, 244, 0};
   c.add(Cm);
-  c.setDecay(Cm, DecayData{5.7e8, 0.0, {DecayMode{6.0, 1.0, 0, true}}});
+  c.setDecay(Cm, DecayData{.halfLife = 5.7e8, .modes = {DecayMode{6.0, 1.0, 0, true}}});
   auto M = c.decayMatrix();
   const double lam = kLn2 / 5.7e8;
   int i = c.indexOf(Cm);
@@ -277,7 +278,7 @@ TEST(DecayMatrix, SpontaneousFissionWithoutYieldsJustRemoves) {
 TEST(DecayMatrix, ExplicitlyStableNuclideContributesNothing) {
   DepletionChain c;
   const Zai S{2, 4, 0};  // 4He, stable, registered via setDecay
-  c.setDecay(S, DecayData{/*halfLife=*/0.0, 0.0, {}});
+  c.setDecay(S, DecayData{.halfLife = 0.0});
   auto M = c.decayMatrix();
   EXPECT_EQ(M.nonZeros(), 0);
 }
@@ -292,7 +293,7 @@ TEST(DecayMatrix, FissionInMultiStepRtypIsSkipped) {
   c.add(dummy);
   // isFission=false but RTYP contains code 6 -> applyDecay flags fission
   // and the production triplet must be omitted.
-  c.setDecay(parent, DecayData{1.0e9, 0.0, {DecayMode{1.6, 1.0, 0, false}}});
+  c.setDecay(parent, DecayData{.halfLife = 1.0e9, .modes = {DecayMode{1.6, 1.0, 0, false}}});
   auto M = c.decayMatrix();
   EXPECT_NEAR(M.coeff(c.indexOf(parent), c.indexOf(parent)), -(kLn2 / 1.0e9), 1e-20);
   // No production of the would-be daughter, since fission was encoded.
@@ -305,7 +306,7 @@ TEST(DecayMatrix, UnregisteredDaughterIsDropped) {
   DepletionChain c;
   const Zai A{53, 135, 0};  // beta- -> Xe-135, which we deliberately omit
   c.add(A);
-  c.setDecay(A, DecayData{100.0, 0.0, {DecayMode{1.0, 1.0, 0, false}}});
+  c.setDecay(A, DecayData{.halfLife = 100.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});
   auto M = c.decayMatrix();
   EXPECT_EQ(c.indexOf({54, 135, 0}), -1);              // daughter absent
   EXPECT_NEAR(M.coeff(0, 0), -(kLn2 / 100.0), 1e-15);  // parent still removed
