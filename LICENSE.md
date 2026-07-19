@@ -25,7 +25,7 @@ They are noted because they were copied or derived from external sources.
      ENDFtk's unit-test fixtures (same source/license). These files are
      evaluated nuclear data included solely for testing the reader.
 
-3. ENDFtk (optional dependency, fetched at build time with -DWITH_ENDFTK=ON)
+3. ENDFtk (optional dependency, fetched at build time with -DCRAM_WITH_ENDFTK=ON)
    njoy/ENDFtk and its dependencies (njoy/tools, spdlog, fast_float) are not
    bundled here; they are fetched via CMake FetchContent and retain their own
    licenses (BSD 3-Clause / MIT).
