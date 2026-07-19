@@ -64,6 +64,21 @@ jobs:
           fail_ci_if_error: false
           flags: unittests
 
+  windows-build-test:
+    needs: format-check
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (MSVC, FetchContent pulls Eigen + GTest)
+        run: cmake -B build -G "Visual Studio 17 2022" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release -j
+
+      - name: Run tests
+        run: ctest --test-dir build --build-config Release --output-on-failure
+
   sanitizers:
     needs: format-check
     runs-on: ubuntu-24.04

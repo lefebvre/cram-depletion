@@ -53,7 +53,11 @@ add_library(cram
 target_include_directories(cram PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(cram PUBLIC Eigen3::Eigen cram_quality_flags)
 target_compile_features(cram PUBLIC cxx_std_20)
-target_compile_options(cram PRIVATE -Wall -Wextra)
+if(MSVC)
+  target_compile_options(cram PRIVATE /W4)
+else()
+  target_compile_options(cram PRIVATE -Wall -Wextra)
+endif()
 
 if(ENABLE_CLANG_TIDY)
   find_program(CLANG_TIDY_EXE NAMES clang-tidy)
