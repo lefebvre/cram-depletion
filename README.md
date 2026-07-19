@@ -40,11 +40,16 @@ cmake --build build
 ./build/deplete            # self-contained decay demo
 
 # with the ENDFtk reader (pulls ENDFtk v1.2.0 + transitive deps)
-cmake -B build -DWITH_ENDFTK=ON
+cmake -B build -DCRAM_WITH_ENDFTK=ON
 cmake --build build
 ./build/deplete decay_sublibrary.endf 86400
 ctest --test-dir build -R EndfReaderIntegration   # parses real ENDF data
 ```
+
+All project build options are `CRAM_`-prefixed (`CRAM_WITH_ENDFTK`,
+`CRAM_ENABLE_TESTS`, `CRAM_ENABLE_COVERAGE`, `CRAM_ENABLE_SANITIZERS`,
+`CRAM_ENABLE_BENCHMARKS`, `CRAM_ENABLE_CLANG_TIDY`) so they don't collide
+with the options of dependencies fetched via FetchContent.
 
 ## Tests, coverage, and quality checks
 
@@ -60,18 +65,25 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 
 # coverage -> build/coverage/coverage.info  (LCOV tracefile)
-cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCRAM_ENABLE_COVERAGE=ON
 cmake --build build
 cmake --build build --target coverage
 
 # Address + UB sanitizers
-cmake -B build -DENABLE_SANITIZERS=ON && cmake --build build && ctest --test-dir build
+cmake -B build -DCRAM_ENABLE_SANITIZERS=ON && cmake --build build && ctest --test-dir build
 
 # format + static analysis
 clang-format --dry-run -Werror cram/*.{hpp,cpp} cram-apps/*.cpp tests/**/*.{hpp,cpp}
 cmake --build build --target cppcheck      # cppcheck
 clang-tidy -p build cram/*.cpp             # clang-tidy (config in .clang-tidy)
 ```
+
+CTest test names are prefixed with `cram.` (e.g. `cram.Cram.ScalarExponential`)
+to namespace this project's tests apart from any dependency's. When Eigen is
+pulled via FetchContent (rather than found system-wide) it would otherwise
+register its own ~900-test suite into the same CTest project; `BUILD_TESTING`
+is forced off around Eigen's configuration in `CMakeLists.txt` so `ctest` only
+sees the CRAM suite.
 
 Coverage is produced via `cmake/gcov_to_lcov.py` (a thin wrapper around
 `gcov -j -b -c`), so no `gcovr`/`lcov` install is needed locally. The output
@@ -82,7 +94,8 @@ the `coverage` target has been built.
 `.github/workflows/ci.yml` runs format-check (gating the rest of the
 pipeline so noncompliant formatting fails fast), then build-test-coverage
 (with `gcovr` enforcing a 95% line-coverage floor + HTML artifact),
-sanitizers, static-analysis, and the ENDFtk integration job. Test layout:
+a Windows MSVC build-and-test job, sanitizers, static-analysis, and the
+ENDFtk integration job. Test layout:
 
 ```
 tests/bateman.hpp        analytic Bateman references

@@ -16,6 +16,15 @@ set(FETCHCONTENT_BASE_DIR ${CMAKE_SOURCE_DIR}/external CACHE PATH
 find_package(Eigen3 3.4 QUIET NO_MODULE)
 if(NOT Eigen3_FOUND)
   include(FetchContent)
+  # When Eigen is fetched instead of found system-wide, its CMake gates its
+  # own ~900-test suite on BUILD_TESTING (Eigen/CMakeLists.txt). Those tests
+  # would be registered into our CTest project as targets we never build, so
+  # `ctest` would try to run nonexistent binaries. Force BUILD_TESTING off in
+  # the cache for Eigen's configure (Eigen's old cmake_minimum_required resets
+  # CMP0077, so only a cache entry — which option() never overrides — takes
+  # effect), then drop the cache entry so our own include(CTest) recreates it
+  # (default ON) and still enables this project's tests.
+  set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
   FetchContent_Declare(eigen
     GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
     GIT_TAG        3.4.0
@@ -23,22 +32,26 @@ if(NOT Eigen3_FOUND)
     EXCLUDE_FROM_ALL
     SYSTEM)
   FetchContent_MakeAvailable(eigen)
+  unset(BUILD_TESTING CACHE)
 endif()
 
-option(WITH_ENDFTK      "Build the ENDFtk-based data reader"        OFF)
-option(ENABLE_TESTS     "Build the unit tests"                      ON)
-option(ENABLE_BENCHMARKS "Build the Google Benchmark perf suite"    OFF)
-option(ENABLE_COVERAGE  "Instrument for code coverage (gcov/gcovr)" OFF)
-option(ENABLE_SANITIZERS "Build with Address + UB sanitizers"       OFF)
-option(ENABLE_CLANG_TIDY "Run clang-tidy during the build"          OFF)
+# All project options are CRAM_-prefixed so they don't collide with the
+# options of packages pulled in via FetchContent (Eigen, googletest, ENDFtk),
+# which share CMake's global option/cache namespace.
+option(CRAM_WITH_ENDFTK      "Build the ENDFtk-based data reader"        OFF)
+option(CRAM_ENABLE_TESTS     "Build the unit tests"                      ON)
+option(CRAM_ENABLE_BENCHMARKS "Build the Google Benchmark perf suite"    OFF)
+option(CRAM_ENABLE_COVERAGE  "Instrument for code coverage (gcov/gcovr)" OFF)
+option(CRAM_ENABLE_SANITIZERS "Build with Address + UB sanitizers"       OFF)
+option(CRAM_ENABLE_CLANG_TIDY "Run clang-tidy during the build"          OFF)
 
 # --- shared instrumentation flags (coverage / sanitizers) ------------------
 add_library(cram_quality_flags INTERFACE)
-if(ENABLE_COVERAGE)
+if(CRAM_ENABLE_COVERAGE)
   target_compile_options(cram_quality_flags INTERFACE --coverage -O0 -g)
   target_link_options(cram_quality_flags INTERFACE --coverage)
 endif()
-if(ENABLE_SANITIZERS)
+if(CRAM_ENABLE_SANITIZERS)
   target_compile_options(cram_quality_flags INTERFACE
     -fsanitize=address,undefined -fno-omit-frame-pointer -g)
   target_link_options(cram_quality_flags INTERFACE -fsanitize=address,undefined)
@@ -53,16 +66,20 @@ add_library(cram
 target_include_directories(cram PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(cram PUBLIC Eigen3::Eigen cram_quality_flags)
 target_compile_features(cram PUBLIC cxx_std_20)
-target_compile_options(cram PRIVATE -Wall -Wextra)
+if(MSVC)
+  target_compile_options(cram PRIVATE /W4)
+else()
+  target_compile_options(cram PRIVATE -Wall -Wextra)
+endif()
 
-if(ENABLE_CLANG_TIDY)
+if(CRAM_ENABLE_CLANG_TIDY)
   find_program(CLANG_TIDY_EXE NAMES clang-tidy)
   if(CLANG_TIDY_EXE)
     set_target_properties(cram PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
   endif()
 endif()
 
-if(WITH_ENDFTK)
+if(CRAM_WITH_ENDFTK)
   include(FetchContent)
   # Force spdlog (pulled in transitively by njoy/tools) to use std::format
   # instead of its bundled fmt v10, which trips constexpr format-string
@@ -84,7 +101,7 @@ target_link_libraries(deplete PRIVATE cram)
 
 # --- tests ------------------------------------------------------------------
 include(CTest)
-if(ENABLE_TESTS)
+if(CRAM_ENABLE_TESTS)
   find_package(GTest QUIET)
   if(NOT GTest_FOUND)
     include(FetchContent)
@@ -98,14 +115,14 @@ if(ENABLE_TESTS)
 endif()
 
 # --- benchmarks -------------------------------------------------------------
-if(ENABLE_BENCHMARKS)
+if(CRAM_ENABLE_BENCHMARKS)
   add_subdirectory(bench)
 endif()
 
 # --- coverage report target -------------------------------------------------
 # Uses gcov + cmake/gcov_to_lcov.py to produce an LCOV tracefile that
 # VS Code's CMake Tools extension (cmake.coverageInfoFiles) consumes.
-if(ENABLE_COVERAGE)
+if(CRAM_ENABLE_COVERAGE)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   find_program(GCOV_EXE NAMES gcov REQUIRED)
 
