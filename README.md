@@ -31,7 +31,8 @@ external/                FetchContent cache (gitignored; survives clean builds)
 
 Requires CMake >= 3.28 and a C++20 compiler. Eigen, googletest, and ENDFtk
 are pulled via FetchContent if not found system-wide; their sources land in
-`external/` so they're not re-cloned on every clean build.
+`external/` so they're not re-cloned on every clean build. The Eigen fallback
+defaults to v5.0.1 and is configurable (see `CRAM_EIGEN_GIT_TAG` below).
 
 ```bash
 # core + demo
@@ -50,6 +51,29 @@ All project build options are `CRAM_`-prefixed (`CRAM_WITH_ENDFTK`,
 `CRAM_ENABLE_TESTS`, `CRAM_ENABLE_COVERAGE`, `CRAM_ENABLE_SANITIZERS`,
 `CRAM_ENABLE_BENCHMARKS`, `CRAM_ENABLE_CLANG_TIDY`) so they don't collide
 with the options of dependencies fetched via FetchContent.
+
+Which Eigen gets used is controlled by three cache variables:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `CRAM_EIGEN_MIN_VERSION` | `3.4` | A system Eigen older than this is ignored and the fetch fallback is used instead |
+| `CRAM_EIGEN_GIT_REPOSITORY` | `https://gitlab.com/libeigen/eigen.git` | Repository cloned when Eigen must be fetched |
+| `CRAM_EIGEN_GIT_TAG` | `5.0.1` | Tag, branch, or commit fetched. A bare commit SHA disables the shallow clone automatically |
+
+`find_package(Eigen3)` is deliberately called *without* a version argument:
+Eigen's package version file uses `SameMajorVersion` compatibility, so asking
+for 3.4 would reject a system Eigen 5.x. The floor is applied afterwards from
+`CRAM_EIGEN_MIN_VERSION`; the configure log always reports which Eigen won.
+
+```bash
+# build against a different Eigen (ignores any system install)
+cmake -B build -DCRAM_EIGEN_GIT_TAG=3.4.0 -DCMAKE_DISABLE_FIND_PACKAGE_Eigen3=ON
+```
+
+To exercise the fetch path when a system Eigen is present, use CMake's stock
+escapes — `-DCMAKE_DISABLE_FIND_PACKAGE_Eigen3=ON` or
+`-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER`. No project-specific option is
+needed for that.
 
 ## Tests, coverage, and quality checks
 
@@ -79,11 +103,13 @@ clang-tidy -p build cram/*.cpp             # clang-tidy (config in .clang-tidy)
 ```
 
 CTest test names are prefixed with `cram.` (e.g. `cram.Cram.ScalarExponential`)
-to namespace this project's tests apart from any dependency's. When Eigen is
-pulled via FetchContent (rather than found system-wide) it would otherwise
-register its own ~900-test suite into the same CTest project; `BUILD_TESTING`
-is forced off around Eigen's configuration in `CMakeLists.txt` so `ctest` only
-sees the CRAM suite.
+to namespace this project's tests apart from any dependency's. Eigen 3.4, when
+pulled via FetchContent rather than found system-wide, would otherwise register
+its own ~900-test suite into the same CTest project; `BUILD_TESTING` is forced
+off around Eigen's configuration in `CMakeLists.txt` (and the user's own value
+restored afterwards) so `ctest` only sees the CRAM suite. Eigen >= 5 gates its
+suite on `PROJECT_IS_TOP_LEVEL` and needs no such help, but 3.4-era tags remain
+selectable via `CRAM_EIGEN_GIT_TAG`, so the guard stays.
 
 Coverage is produced via `cmake/gcov_to_lcov.py` (a thin wrapper around
 `gcov -j -b -c`), so no `gcovr`/`lcov` install is needed locally. The output

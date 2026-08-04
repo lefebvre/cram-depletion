@@ -13,28 +13,6 @@ endif()
 set(FETCHCONTENT_BASE_DIR ${CMAKE_SOURCE_DIR}/external CACHE PATH
     "Directory where FetchContent stores downloaded sources")
 
-find_package(Eigen3 QUIET NO_MODULE)
-if(NOT Eigen3_FOUND)
-  include(FetchContent)
-  # When Eigen is fetched instead of found system-wide, its CMake gates its
-  # own ~900-test suite on BUILD_TESTING (Eigen/CMakeLists.txt). Those tests
-  # would be registered into our CTest project as targets we never build, so
-  # `ctest` would try to run nonexistent binaries. Force BUILD_TESTING off in
-  # the cache for Eigen's configure (Eigen's old cmake_minimum_required resets
-  # CMP0077, so only a cache entry — which option() never overrides — takes
-  # effect), then drop the cache entry so our own include(CTest) recreates it
-  # (default ON) and still enables this project's tests.
-  set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-  FetchContent_Declare(eigen
-    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-    GIT_TAG        5.0.1
-    GIT_SHALLOW    TRUE
-    EXCLUDE_FROM_ALL
-    SYSTEM)
-  FetchContent_MakeAvailable(eigen)
-  unset(BUILD_TESTING CACHE)
-endif()
-
 # All project options are CRAM_-prefixed so they don't collide with the
 # options of packages pulled in via FetchContent (Eigen, googletest, ENDFtk),
 # which share CMake's global option/cache namespace.
@@ -44,6 +22,75 @@ option(CRAM_ENABLE_BENCHMARKS "Build the Google Benchmark perf suite"    OFF)
 option(CRAM_ENABLE_COVERAGE  "Instrument for code coverage (gcov/gcovr)" OFF)
 option(CRAM_ENABLE_SANITIZERS "Build with Address + UB sanitizers"       OFF)
 option(CRAM_ENABLE_CLANG_TIDY "Run clang-tidy during the build"          OFF)
+
+set(CRAM_EIGEN_MIN_VERSION "3.4" CACHE STRING
+    "Minimum acceptable version of a system-installed Eigen")
+set(CRAM_EIGEN_GIT_REPOSITORY "https://gitlab.com/libeigen/eigen.git" CACHE STRING
+    "Git repository used when Eigen must be fetched instead of found")
+set(CRAM_EIGEN_GIT_TAG "5.0.1" CACHE STRING
+    "Git tag, branch, or commit of Eigen used when it must be fetched")
+
+# --- Eigen ------------------------------------------------------------------
+# Eigen's package version file is generated with SameMajorVersion
+# compatibility, so a find_package(Eigen3 3.4) request rejects a system
+# Eigen 5.x outright. Search unconstrained and apply our own floor afterwards.
+find_package(Eigen3 QUIET NO_MODULE)
+if(Eigen3_FOUND AND Eigen3_VERSION VERSION_LESS CRAM_EIGEN_MIN_VERSION)
+  message(STATUS "Ignoring system Eigen ${Eigen3_VERSION} "
+                 "(< ${CRAM_EIGEN_MIN_VERSION})")
+  set(Eigen3_FOUND FALSE)
+endif()
+
+if(Eigen3_FOUND)
+  message(STATUS "Using system Eigen ${Eigen3_VERSION}")
+else()
+  message(STATUS "Fetching Eigen ${CRAM_EIGEN_GIT_TAG} from "
+                 "${CRAM_EIGEN_GIT_REPOSITORY}")
+  include(FetchContent)
+  # Eigen 3.4 declares an unconditional option(BUILD_TESTING ... ON) and then
+  # registers its ~900-test suite into our CTest project as targets we never
+  # build, so `ctest` would try to run nonexistent binaries. Eigen >= 5 gates
+  # that (and BLAS/LAPACK/docs/demos) on PROJECT_IS_TOP_LEVEL and needs no
+  # help from us, but 3.4-era tags are still reachable via CRAM_EIGEN_GIT_TAG,
+  # so keep forcing BUILD_TESTING off in the cache for Eigen's configure (a
+  # cache entry — which option() never overrides — is required because Eigen
+  # 3.4's old cmake_minimum_required resets CMP0077). Restore the user's own
+  # value afterwards so include(CTest) below still sees it.
+  if(DEFINED CACHE{BUILD_TESTING})
+    set(_cram_saved_build_testing "$CACHE{BUILD_TESTING}")
+  endif()
+  set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+
+  # Eigen 3.4 calls export(PACKAGE Eigen3) unconditionally, and its old
+  # cmake_minimum_required leaves CMP0090 at OLD, so the fetched build tree
+  # gets written into the user-wide CMake package registry. Every later
+  # find_package(Eigen3) on that machine — in this project or any other —
+  # would then resolve to a throwaway build directory. Eigen >= 5 guards the
+  # export on PROJECT_IS_TOP_LEVEL; suppress it for the tags that don't.
+  set(CMAKE_EXPORT_NO_PACKAGE_REGISTRY ON)
+
+  # GIT_SHALLOW can only fetch a named branch or tag, not a bare commit.
+  if(CRAM_EIGEN_GIT_TAG MATCHES "^[0-9a-fA-F]{7,40}$")
+    set(_cram_eigen_shallow FALSE)
+  else()
+    set(_cram_eigen_shallow TRUE)
+  endif()
+
+  FetchContent_Declare(eigen
+    GIT_REPOSITORY ${CRAM_EIGEN_GIT_REPOSITORY}
+    GIT_TAG        ${CRAM_EIGEN_GIT_TAG}
+    GIT_SHALLOW    ${_cram_eigen_shallow}
+    EXCLUDE_FROM_ALL
+    SYSTEM)
+  FetchContent_MakeAvailable(eigen)
+
+  if(DEFINED _cram_saved_build_testing)
+    set(BUILD_TESTING "${_cram_saved_build_testing}" CACHE BOOL
+        "Build the testing tree." FORCE)
+  else()
+    unset(BUILD_TESTING CACHE)
+  endif()
+endif()
 
 # --- shared instrumentation flags (coverage / sanitizers) ------------------
 add_library(cram_quality_flags INTERFACE)
