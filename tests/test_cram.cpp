@@ -164,6 +164,7 @@ TEST(Cram, Orders16And48Agree) {
   Eigen::VectorXd n16 = cramSolve(A, unitFirst(5), t, CramOrder::CRAM16);
   Eigen::VectorXd n48 = cramSolve(A, unitFirst(5), t, CramOrder::CRAM48);
   for (int i = 0; i < n48.size(); ++i)
-    if (std::abs(n48(i)) > 1e-8)
+    if (std::abs(n48(i)) > 1e-8) {
       EXPECT_NEAR(n16(i), n48(i), 1e-4 * std::abs(n48(i))) << "index " << i;
+    }
 }
