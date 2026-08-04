@@ -13,7 +13,7 @@ endif()
 set(FETCHCONTENT_BASE_DIR ${CMAKE_SOURCE_DIR}/external CACHE PATH
     "Directory where FetchContent stores downloaded sources")
 
-find_package(Eigen3 3.4 QUIET NO_MODULE)
+find_package(Eigen3 QUIET NO_MODULE)
 if(NOT Eigen3_FOUND)
   include(FetchContent)
   # When Eigen is fetched instead of found system-wide, its CMake gates its
