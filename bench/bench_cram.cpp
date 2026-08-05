@@ -1,74 +1,163 @@
+// Benchmarks over both matrix regimes this library serves.
+//
+//   decay-only  acyclic; every transition runs forward. What
+//               DepletionChain::decayMatrix() builds, and what the ENDF MT457
+//               path and cram-apps/deplete.cpp operate on. SparseLU finds an
+//               elimination order with little fill-in, so these are the cheap
+//               ones.
+//   burnup      cyclic; (n,gamma) walks the chain up while decay walks it back
+//               down, plus fission products linking high indices to low ones.
+//               Fill-in dominates the factorization.
+//
+// Both are measured because they cost substantially different amounts and an
+// optimization that helps one need not help the other. Reporting only one of
+// them is how the suite previously came to describe an acyclic matrix as
+// "representative of a real depletion chain".
 #include <benchmark/benchmark.h>
 
+#include "acyclic_chain.hpp"
 #include "cram/cram.hpp"
 #include "cram/cram_solver.hpp"
-#include "synthetic_chain.hpp"
+#include "cyclic_chain.hpp"
 
 namespace {
 
-// Single CRAM solve at varying N. CRAM16 vs CRAM48 are reported separately so
-// the cost of the extra poles is visible at a glance.
-template <cram::CramOrder Order>
+constexpr double kDay = 86400.0;
+
+enum class Shape { DecayOnly, Burnup };
+
+template <Shape S>
+auto buildChain(int n) {
+  if constexpr (S == Shape::DecayOnly) {
+    return cram_test::buildAcyclicChain(n);
+  } else {
+    return cram_test::buildCyclicChain(n);
+  }
+}
+
+constexpr const char* shapeName(Shape s) {
+  return s == Shape::DecayOnly ? "decay-only" : "burnup";
+}
+
+// One-shot solve: factorize all K poles and solve, the cost paid per call by
+// cramSolve(). CRAM16 and CRAM48 are reported separately so the price of the
+// extra poles is visible.
+template <Shape S, cram::CramOrder Order>
 void BM_CramSolve(benchmark::State& state) {
   const int n = static_cast<int>(state.range(0));
-  const auto chain = cram_bench::buildSyntheticChain(n);
-  const double dt = 86400.0;  // one day
+  const auto chain = buildChain<S>(n);
 
   for (auto _ : state) {
-    auto out = cram::cramSolve(chain.A, chain.n0, dt, Order);
+    auto out = cram::cramSolve(chain.A, chain.n0, kDay, Order);
     benchmark::DoNotOptimize(out);
   }
-  state.SetLabel(Order == cram::CramOrder::CRAM16 ? "CRAM16" : "CRAM48");
+  state.SetLabel(std::string(shapeName(S)) +
+                 (Order == cram::CramOrder::CRAM16 ? "/CRAM16" : "/CRAM48"));
 }
-BENCHMARK(BM_CramSolve<cram::CramOrder::CRAM16>)->Arg(256)->Arg(1024)->Arg(1675);
-BENCHMARK(BM_CramSolve<cram::CramOrder::CRAM48>)->Arg(256)->Arg(1024)->Arg(1675);
+BENCHMARK(BM_CramSolve<Shape::DecayOnly, cram::CramOrder::CRAM16>)->Arg(256)->Arg(1024)->Arg(1675);
+BENCHMARK(BM_CramSolve<Shape::DecayOnly, cram::CramOrder::CRAM48>)->Arg(256)->Arg(1024)->Arg(1675);
+BENCHMARK(BM_CramSolve<Shape::Burnup, cram::CramOrder::CRAM16>)->Arg(256)->Arg(1024)->Arg(1675);
+BENCHMARK(BM_CramSolve<Shape::Burnup, cram::CramOrder::CRAM48>)->Arg(256)->Arg(1024)->Arg(1675);
 
-// Multi-step time march using the free function. Each step re-factorizes all
-// K poles even though A and dt are unchanged — this is the cost the cached
-// solver below replaces.
+// The two halves of the cached solver, measured apart. Reporting prepare+march
+// as one number hides which half a change moved, and the halves have opposite
+// parallelism: the K factorizations are independent of one another, while
+// apply() is strictly sequential because the IPF form feeds each pole's result
+// into the next.
+template <Shape S>
+void BM_CramSolverPrepare(benchmark::State& state) {
+  const int n = static_cast<int>(state.range(0));
+  const auto chain = buildChain<S>(n);
+
+  for (auto _ : state) {
+    cram::CramSolver solver(cram::CramOrder::CRAM48);
+    solver.prepare(chain.A, kDay);
+    benchmark::DoNotOptimize(solver);
+  }
+  state.SetLabel(shapeName(S));
+}
+BENCHMARK(BM_CramSolverPrepare<Shape::DecayOnly>)
+    ->Arg(256)
+    ->Arg(1024)
+    ->Arg(1675)
+    ->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_CramSolverPrepare<Shape::Burnup>)
+    ->Arg(256)
+    ->Arg(1024)
+    ->Arg(1675)
+    ->Unit(benchmark::kMillisecond);
+
+// Solves from the same input vector every iteration rather than marching, so
+// the inventory cannot decay into denormals and skew the timing.
+template <Shape S>
+void BM_CramSolverApply(benchmark::State& state) {
+  const int n = static_cast<int>(state.range(0));
+  const auto chain = buildChain<S>(n);
+  cram::CramSolver solver(cram::CramOrder::CRAM48);
+  solver.prepare(chain.A, kDay);
+
+  for (auto _ : state) {
+    Eigen::VectorXd out = solver.apply(chain.n0);
+    benchmark::DoNotOptimize(out);
+  }
+  state.SetLabel(shapeName(S));
+}
+BENCHMARK(BM_CramSolverApply<Shape::DecayOnly>)->Arg(256)->Arg(1024)->Arg(1675);
+BENCHMARK(BM_CramSolverApply<Shape::Burnup>)->Arg(256)->Arg(1024)->Arg(1675);
+
+// End-to-end march via the free function: every step refactorizes all K poles
+// even though A and dt never change. This is the cost CramSolver removes.
+template <Shape S>
 void BM_DepletionMarch(benchmark::State& state) {
   const int n = static_cast<int>(state.range(0));
   const int steps = static_cast<int>(state.range(1));
-  const auto chain = cram_bench::buildSyntheticChain(n);
-  const double dt = 86400.0;
+  const auto chain = buildChain<S>(n);
 
   for (auto _ : state) {
     Eigen::VectorXd y = chain.n0;
     for (int s = 0; s < steps; ++s)
-      y = cram::cramSolve(chain.A, y, dt, cram::CramOrder::CRAM48);
+      y = cram::cramSolve(chain.A, y, kDay, cram::CramOrder::CRAM48);
     benchmark::DoNotOptimize(y);
   }
   state.counters["steps"] = steps;
+  state.SetLabel(shapeName(S));
 }
-BENCHMARK(BM_DepletionMarch)
+BENCHMARK(BM_DepletionMarch<Shape::DecayOnly>)
     ->Args({1675, 20})
     ->Args({1675, 100})
-    // ->Args({1675, 500})
+    ->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_DepletionMarch<Shape::Burnup>)
+    ->Args({1675, 20})
+    ->Args({1675, 100})
     ->Unit(benchmark::kMillisecond);
 
-// Same march, but uses CramSolver: prepare() once, then N apply() calls. The
-// per-iteration cost should drop to just K complex sparse solves (24 for
-// CRAM48), with the factorize cost amortized into the first iteration.
+// The same march through CramSolver: prepare() once, then N apply() calls.
+// Decay-only marches over many sub-steps are the case CramSolver's header calls
+// out as its reason to exist, so that regime is measured too.
+template <Shape S>
 void BM_CramSolverCached(benchmark::State& state) {
   const int n = static_cast<int>(state.range(0));
   const int steps = static_cast<int>(state.range(1));
-  const auto chain = cram_bench::buildSyntheticChain(n);
-  const double dt = 86400.0;
+  const auto chain = buildChain<S>(n);
 
   for (auto _ : state) {
     cram::CramSolver solver(cram::CramOrder::CRAM48);
-    solver.prepare(chain.A, dt);
+    solver.prepare(chain.A, kDay);
     Eigen::VectorXd y = chain.n0;
     for (int s = 0; s < steps; ++s)
       y = solver.apply(y);
     benchmark::DoNotOptimize(y);
   }
   state.counters["steps"] = steps;
+  state.SetLabel(shapeName(S));
 }
-BENCHMARK(BM_CramSolverCached)
+BENCHMARK(BM_CramSolverCached<Shape::DecayOnly>)
     ->Args({1675, 20})
     ->Args({1675, 100})
-    // ->Args({1675, 500})
+    ->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_CramSolverCached<Shape::Burnup>)
+    ->Args({1675, 20})
+    ->Args({1675, 100})
     ->Unit(benchmark::kMillisecond);
 
 }  // namespace

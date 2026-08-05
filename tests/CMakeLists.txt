@@ -5,7 +5,8 @@ add_executable(unit_tests
   test_cram_solver.cpp
   test_cram_golden.cpp)
 
-target_include_directories(unit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(unit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+                                              ${CMAKE_SOURCE_DIR}/testing)
 target_link_libraries(unit_tests PRIVATE cram cram_quality_flags cram_warning_flags
                                          GTest::gtest_main)
 

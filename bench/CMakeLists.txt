@@ -13,8 +13,9 @@ if(NOT benchmark_FOUND)
   FetchContent_MakeAvailable(benchmark)
 endif()
 
-add_executable(cram_bench
-  bench_cram.cpp
-  synthetic_chain.cpp)
-target_include_directories(cram_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_executable(cram_bench bench_cram.cpp)
+# testing/ holds the shared cyclic-chain fixture. The benchmarks and the golden
+# regression test deliberately measure the *same* matrix structure, so the
+# generator lives in one place rather than being duplicated here.
+target_include_directories(cram_bench PRIVATE ${CMAKE_SOURCE_DIR}/testing)
 target_link_libraries(cram_bench PRIVATE cram cram_warning_flags benchmark::benchmark_main)

@@ -3,6 +3,12 @@
 // A seeded, deterministic synthetic burnup matrix that is *cyclic*, unlike the
 // linear chains used by the analytic-Bateman tests.
 //
+// Shared by the golden regression test and the benchmark suite on purpose: what
+// the benchmarks time and what the golden vector locks should be the same matrix
+// structure, so the generator lives here rather than being duplicated. Changing
+// it changes the frozen data in tests/cram_golden_data.hpp -- the golden test
+// will fail if the topology or the RNG draw sequence shifts, which is intended.
+//
 // Why this exists: every other solver test builds a strictly lower-triangular A
 // (a linear decay chain), for which Eigen::SparseLU does no pivoting and
 // produces no fill-in. That leaves the pole-matrix assembly path exercised only
