@@ -47,10 +47,11 @@ void expectClose(const Eigen::VectorXd& got, const std::vector<double>& ref, dou
   for (double r : ref)
     scale = std::max(scale, std::abs(r));
   for (std::size_t i = 0; i < ref.size(); ++i) {
-    if (std::abs(ref[i]) > 1e-6 * scale)
+    if (std::abs(ref[i]) > 1e-6 * scale) {
       EXPECT_NEAR(got(i), ref[i], relTol * std::abs(ref[i])) << "index " << i;
-    else
+    } else {
       EXPECT_NEAR(got(i), ref[i], absTol) << "index " << i << " (trace)";
+    }
   }
 }
 
@@ -163,8 +164,9 @@ TEST(Cram, Orders16And48Agree) {
   double t = 80.0;
   Eigen::VectorXd n16 = cramSolve(A, unitFirst(5), t, CramOrder::CRAM16);
   Eigen::VectorXd n48 = cramSolve(A, unitFirst(5), t, CramOrder::CRAM48);
-  for (int i = 0; i < n48.size(); ++i)
+  for (int i = 0; i < n48.size(); ++i) {
     if (std::abs(n48(i)) > 1e-8) {
       EXPECT_NEAR(n16(i), n48(i), 1e-4 * std::abs(n48(i))) << "index " << i;
     }
+  }
 }

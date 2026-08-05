@@ -34,7 +34,9 @@ jobs:
                                    gcovr cppcheck clang-tidy
 
       - name: Configure (Debug + coverage)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCRAM_ENABLE_COVERAGE=ON
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCRAM_ENABLE_COVERAGE=ON \
+                -DCRAM_WERROR=ON
 
       - name: Build
         run: cmake --build build -j
@@ -71,7 +73,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure (MSVC, FetchContent pulls Eigen + GTest)
-        run: cmake -B build -G "Visual Studio 17 2022" -DCMAKE_BUILD_TYPE=Release
+        run: >
+          cmake -B build -G "Visual Studio 17 2022" -DCMAKE_BUILD_TYPE=Release
+          -DCRAM_WERROR=ON
 
       - name: Build
         run: cmake --build build --config Release -j
@@ -97,7 +101,8 @@ jobs:
       - name: Configure (Eigen ${{ matrix.eigen_tag }} via FetchContent)
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
-                -DCRAM_EIGEN_GIT_TAG=${{ matrix.eigen_tag }}
+                -DCRAM_EIGEN_GIT_TAG=${{ matrix.eigen_tag }} \
+                -DCRAM_WERROR=ON
 
       - name: Build
         run: cmake --build build -j
@@ -116,7 +121,48 @@ jobs:
           sudo apt-get install -y cmake g++ libeigen3-dev libgtest-dev
       - name: Build + test with ASan/UBSan
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCRAM_ENABLE_SANITIZERS=ON
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCRAM_ENABLE_SANITIZERS=ON \
+                -DCRAM_WERROR=ON
+          cmake --build build -j
+          ctest --test-dir build --output-on-failure
+
+  # ThreadSanitizer needs a build of its own -- it cannot be combined with the
+  # ASan/UBSan job above. The library is single-threaded today, so this job finds
+  # nothing; it exists so the guard is already in place before prepare() is
+  # parallelized. Note that TSan reports false positives against an
+  # uninstrumented OpenMP runtime and against libstdc++'s TBB-backed parallel
+  # algorithms, so concurrency here should be plain std::thread/std::async.
+  thread-sanitizer:
+    needs: format-check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libeigen3-dev libgtest-dev
+      - name: Build + test with TSan
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCRAM_ENABLE_TSAN=ON \
+                -DCRAM_WERROR=ON
+          cmake --build build -j
+          ctest --test-dir build --output-on-failure
+
+  clang-build-test:
+    needs: format-check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libeigen3-dev libgtest-dev
+      - name: Configure + build + test (clang)
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCRAM_WERROR=ON
           cmake --build build -j
           ctest --test-dir build --output-on-failure
 
@@ -133,8 +179,11 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
       - name: cppcheck
         run: cmake --build build --target cppcheck
+      # tests/ was previously outside every analyzer: cppcheck is pointed at
+      # cram/ only and this step listed cram/*.cpp, so nothing ever inspected
+      # test sources.
       - name: clang-tidy
-        run: clang-tidy -p build cram/*.cpp
+        run: clang-tidy -p build cram/*.cpp tests/*.cpp
 
   endftk-integration:
     needs: format-check
@@ -147,7 +196,8 @@ jobs:
           sudo apt-get install -y cmake g++ libeigen3-dev libgtest-dev
       - name: Build with ENDFtk reader (FetchContent pulls ENDFtk + deps)
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCRAM_WITH_ENDFTK=ON
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCRAM_WITH_ENDFTK=ON \
+                -DCRAM_WERROR=ON
           cmake --build build -j
       - name: Run integration tests against real ENDF data
         run: ctest --test-dir build -R EndfReaderIntegration --output-on-failure

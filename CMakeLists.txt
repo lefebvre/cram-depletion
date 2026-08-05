@@ -21,7 +21,14 @@ option(CRAM_ENABLE_TESTS     "Build the unit tests"                      ON)
 option(CRAM_ENABLE_BENCHMARKS "Build the Google Benchmark perf suite"    OFF)
 option(CRAM_ENABLE_COVERAGE  "Instrument for code coverage (gcov/gcovr)" OFF)
 option(CRAM_ENABLE_SANITIZERS "Build with Address + UB sanitizers"       OFF)
+# ThreadSanitizer needs its own build: it cannot be combined with ASan, so it
+# gets a separate option (and a separate CI job) rather than joining the one
+# above.
+option(CRAM_ENABLE_TSAN      "Build with ThreadSanitizer"                OFF)
 option(CRAM_ENABLE_CLANG_TIDY "Run clang-tidy during the build"          OFF)
+# Off by default so a future compiler inventing a new warning never breaks a
+# user's build. CI turns it on, which is where new warnings must be caught.
+option(CRAM_WERROR           "Treat compiler warnings as errors"         OFF)
 
 set(CRAM_EIGEN_MIN_VERSION "3.4" CACHE STRING
     "Minimum acceptable version of a system-installed Eigen")
@@ -103,6 +110,36 @@ if(CRAM_ENABLE_SANITIZERS)
     -fsanitize=address,undefined -fno-omit-frame-pointer -g)
   target_link_options(cram_quality_flags INTERFACE -fsanitize=address,undefined)
 endif()
+if(CRAM_ENABLE_TSAN)
+  if(CRAM_ENABLE_SANITIZERS)
+    message(FATAL_ERROR
+            "CRAM_ENABLE_TSAN and CRAM_ENABLE_SANITIZERS are mutually exclusive: "
+            "ThreadSanitizer cannot be combined with AddressSanitizer.")
+  endif()
+  target_compile_options(cram_quality_flags INTERFACE
+    -fsanitize=thread -fno-omit-frame-pointer -g)
+  target_link_options(cram_quality_flags INTERFACE -fsanitize=thread)
+endif()
+
+# --- warning flags ----------------------------------------------------------
+# Linked PRIVATE into every first-party target -- library, tests, driver and
+# benchmarks alike. Previously these were set directly on `cram` and were
+# therefore PRIVATE to it, so nothing in tests/, cram-apps/ or bench/ was ever
+# compiled with -Wall: a warning in test code could not be caught by any CI job.
+# Keep the linkage PRIVATE so consumers of `cram` do not inherit our warning
+# policy.
+add_library(cram_warning_flags INTERFACE)
+if(MSVC)
+  target_compile_options(cram_warning_flags INTERFACE /W4)
+  if(CRAM_WERROR)
+    target_compile_options(cram_warning_flags INTERFACE /WX)
+  endif()
+else()
+  target_compile_options(cram_warning_flags INTERFACE -Wall -Wextra)
+  if(CRAM_WERROR)
+    target_compile_options(cram_warning_flags INTERFACE -Werror)
+  endif()
+endif()
 
 # --- core library -----------------------------------------------------------
 add_library(cram
@@ -112,12 +149,8 @@ add_library(cram
   cram/endf_reader.cpp)
 target_include_directories(cram PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(cram PUBLIC Eigen3::Eigen cram_quality_flags)
+target_link_libraries(cram PRIVATE cram_warning_flags)
 target_compile_features(cram PUBLIC cxx_std_20)
-if(MSVC)
-  target_compile_options(cram PRIVATE /W4)
-else()
-  target_compile_options(cram PRIVATE -Wall -Wextra)
-endif()
 
 if(CRAM_ENABLE_CLANG_TIDY)
   find_program(CLANG_TIDY_EXE NAMES clang-tidy)
@@ -133,10 +166,16 @@ if(CRAM_WITH_ENDFTK)
   # checks of recent compilers. Set as cache before MakeAvailable so spdlog
   # itself is built with it — propagates to consumers via spdlog::spdlog.
   set(SPDLOG_USE_STD_FORMAT ON CACHE BOOL "" FORCE)
+  # SYSTEM, as for Eigen, googletest and benchmark. endf_reader.cpp includes
+  # <ENDFtk.hpp>, so without it every diagnostic raised inside ENDFtk's headers
+  # (and its njoy/tools dependency) is attributed to our translation unit: with
+  # -Werror on, ENDFtk v1.2.0 alone breaks the build with sign-compare, reorder,
+  # pessimizing-move and unused-parameter errors from code we do not own.
   FetchContent_Declare(ENDFtk
     GIT_REPOSITORY https://github.com/njoy/ENDFtk.git
     GIT_TAG        v1.2.0
-    GIT_SHALLOW    TRUE)
+    GIT_SHALLOW    TRUE
+    SYSTEM)
   FetchContent_MakeAvailable(ENDFtk)
   target_compile_definitions(cram PUBLIC WITH_ENDFTK)
   target_link_libraries(cram PUBLIC njoy::ENDFtk)
@@ -144,7 +183,7 @@ endif()
 
 # --- driver -----------------------------------------------------------------
 add_executable(deplete cram-apps/deplete.cpp)
-target_link_libraries(deplete PRIVATE cram)
+target_link_libraries(deplete PRIVATE cram cram_warning_flags)
 
 # --- tests ------------------------------------------------------------------
 include(CTest)
@@ -152,9 +191,15 @@ if(CRAM_ENABLE_TESTS)
   find_package(GTest QUIET)
   if(NOT GTest_FOUND)
     include(FetchContent)
+    # SYSTEM matches how Eigen and benchmark are fetched. Without it, gtest's
+    # headers are treated as ordinary includes and diagnostics raised inside its
+    # macro expansions are attributed to our test files -- which is why a warning
+    # could appear on a developer machine that fetches gtest and never appear in
+    # CI, where libgtest-dev is installed and resolves under /usr/include.
     FetchContent_Declare(googletest
       GIT_REPOSITORY https://github.com/google/googletest.git
-      GIT_TAG        v1.15.2)
+      GIT_TAG        v1.15.2
+      SYSTEM)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(googletest)
   endif()

@@ -17,4 +17,4 @@ add_executable(cram_bench
   bench_cram.cpp
   synthetic_chain.cpp)
 target_include_directories(cram_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(cram_bench PRIVATE cram benchmark::benchmark_main)
+target_link_libraries(cram_bench PRIVATE cram cram_warning_flags benchmark::benchmark_main)
