@@ -33,6 +33,10 @@ struct Zai {
   }
 };
 
+// Provided so callers can key their own std::unordered_map/set on Zai directly.
+// DepletionChain deliberately does not use it -- it keys on the packed int64
+// instead -- so this is API for consumers, not an internal detail, and is
+// exercised only by its own test.
 struct ZaiHash {
   std::size_t operator()(const Zai& z) const noexcept { return std::hash<std::int64_t>{}(z.key()); }
 };

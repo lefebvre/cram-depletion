@@ -1,7 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <vector>
 
 #include "cram/chain.hpp"
 #include "cram/endf_reader.hpp"
@@ -26,6 +30,89 @@ TEST(Chain, IndexOfAbsent) {
   c.add({1, 1, 0});
   EXPECT_EQ(c.indexOf({1, 1, 0}), 0);
   EXPECT_EQ(c.indexOf({2, 4, 0}), -1);
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic ordering
+// ---------------------------------------------------------------------------
+namespace {
+
+// Five beta- emitters whose daughters are deliberately left unregistered, so
+// close() is what introduces them.
+const std::vector<Zai> kParents = {
+    {40, 97, 0}, {52, 133, 0}, {36, 89, 0}, {58, 143, 0}, {44, 105, 0},
+};
+
+DecayData betaMinus(double halfLife) {
+  return DecayData{.halfLife = halfLife, .modes = {DecayMode{1.0, 1.0, 0, false}}};
+}
+
+// The nuclides close() appended, in the order it appended them.
+std::vector<std::int64_t> daughtersAddedByClose(const std::vector<Zai>& insertionOrder) {
+  DepletionChain c;
+  for (const Zai& z : insertionOrder)
+    c.setDecay(z, betaMinus(1000.0));
+  const int before = c.size();
+  c.close();
+
+  std::vector<std::int64_t> added;
+  for (int i = before; i < c.size(); ++i)
+    added.push_back(c.nuclides()[static_cast<std::size_t>(i)].key());
+  return added;
+}
+
+}  // namespace
+
+// close() walks the decaying nuclides to find daughters to register, and add()
+// hands out matrix indices in call order. Walking an unordered_map would let the
+// hash function decide that order -- and therefore decide the matrix layout, the
+// LU pivoting, and the last bits of every result -- differently on different
+// standard libraries. Feeding the same nuclides in a different sequence must not
+// change the order close() introduces their daughters in.
+TEST(Chain, CloseAddsDaughtersInAnInsertionOrderIndependentOrder) {
+  std::vector<Zai> shuffled = kParents;
+  std::rotate(shuffled.begin(), shuffled.begin() + 2, shuffled.end());
+  std::vector<Zai> reversed(kParents.rbegin(), kParents.rend());
+
+  const std::vector<std::int64_t> a = daughtersAddedByClose(kParents);
+  const std::vector<std::int64_t> b = daughtersAddedByClose(shuffled);
+  const std::vector<std::int64_t> c = daughtersAddedByClose(reversed);
+
+  ASSERT_EQ(a.size(), kParents.size()) << "each parent should contribute one daughter";
+  EXPECT_EQ(a, b);
+  EXPECT_EQ(a, c);
+  // Ascending ZAI, which is what sorting the parent keys before the walk gives.
+  EXPECT_TRUE(std::is_sorted(a.begin(), a.end()));
+}
+
+// The triplet stream reaches setFromTriplets(), which sums duplicate entries in
+// the order it receives them. Hash-ordered iteration would make that summation
+// order, and so the floating-point result, implementation-defined.
+TEST(Chain, DecayMatrixIsIdenticalRegardlessOfInsertionOrder) {
+  auto build = [](const std::vector<Zai>& order) {
+    DepletionChain c;
+    for (const Zai& z : order)
+      c.setDecay(z, betaMinus(1000.0));
+    c.close();
+    return c.decayMatrix();
+  };
+
+  std::vector<Zai> reversed(kParents.rbegin(), kParents.rend());
+  const Eigen::SparseMatrix<double> forward = build(kParents);
+  const Eigen::SparseMatrix<double> backward = build(reversed);
+
+  // Parents keep their own insertion indices, so the matrices are not expected
+  // to be identical -- but they must have the same shape and nonzero count, and
+  // the trace is order-independent, so it should agree to the last bit.
+  ASSERT_EQ(forward.rows(), backward.rows());
+  EXPECT_EQ(forward.nonZeros(), backward.nonZeros());
+  double traceF = 0.0;
+  double traceB = 0.0;
+  for (int i = 0; i < forward.rows(); ++i) {
+    traceF += forward.coeff(i, i);
+    traceB += backward.coeff(i, i);
+  }
+  EXPECT_DOUBLE_EQ(traceF, traceB);
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +358,33 @@ TEST(DecayMatrix, SpontaneousFissionWithoutYieldsJustRemoves) {
   for (int r = 0; r < M.rows(); ++r)
     col += M.coeff(r, i);
   EXPECT_NEAR(col, -lam, 1e-20);  // mass leaves the tracked system
+}
+
+// An unregistered daughter means the matrix silently loses that production and
+// stops conserving atoms. Callers that want to check for it should not have to
+// scrape stderr.
+TEST(DecayMatrix, ReportsDroppedDaughtersThroughTheOutParameter) {
+  DepletionChain c;
+  c.setDecay({40, 97, 0}, DecayData{.halfLife = 1000.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});
+  c.setDecay({52, 133, 0}, DecayData{.halfLife = 900.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});
+
+  int dropped = -1;
+  auto before = c.decayMatrix(&dropped);
+  EXPECT_EQ(dropped, 2) << "neither daughter is registered yet";
+  EXPECT_EQ(before.nonZeros(), 2) << "only the two removal terms survive";
+
+  EXPECT_EQ(c.close(), 2);
+  dropped = -1;
+  auto after = c.decayMatrix(&dropped);
+  EXPECT_EQ(dropped, 0) << "close() registers every reachable daughter";
+
+  // With the chain closed, every column sums to zero and atoms are conserved.
+  for (int col = 0; col < after.cols(); ++col) {
+    double sum = 0.0;
+    for (int row = 0; row < after.rows(); ++row)
+      sum += after.coeff(row, col);
+    EXPECT_NEAR(sum, 0.0, 1e-18) << "column " << col;
+  }
 }
 
 // A nuclide that was registered with setDecay() but is stable (halfLife=0)

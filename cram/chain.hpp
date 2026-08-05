@@ -11,8 +11,8 @@
 #include <Eigen/SparseCore>
 #include <cstdint>
 #include <numbers>
-#include <optional>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "cram/nuclide.hpp"
@@ -84,7 +84,14 @@ public:
 
   // Pure radioactive decay (+ spontaneous fission if SFY were supplied as
   // yields at energy 0). This is all you need for a decay-only calculation.
-  Eigen::SparseMatrix<double> decayMatrix() const;
+  //
+  // If `droppedDaughters` is non-null it receives the number of decay daughters
+  // that were not registered in the chain, and whose production is therefore
+  // absent from the matrix — meaning the matrix does not conserve atoms. Call
+  // close() beforehand and it will be zero. When the pointer is null the same
+  // condition is reported as a warning on stderr instead, so it can never pass
+  // unnoticed either way.
+  Eigen::SparseMatrix<double> decayMatrix(int* droppedDaughters = nullptr) const;
 
   // Add a neutron-induced fission source for one parent into an existing
   // matrix builder. `fissionRate` is the per-atom fission rate of the parent
@@ -120,9 +127,18 @@ private:
   std::vector<Zai> nuclides_;
   std::unordered_map<std::int64_t, int> index_;
   std::unordered_map<std::int64_t, DecayData> decay_;
+  // Matrix indices of the nuclides carrying decay data, in the order setDecay()
+  // first registered them. Matrix assembly walks this instead of decay_ so the
+  // triplet order — and therefore the summation order of duplicates, and the
+  // last bits of the result — cannot depend on hash iteration order. Kept in
+  // sync in setDecay(), the only place decay_ gains a key.
+  std::vector<int> decayOrder_;
   std::unordered_map<std::int64_t, std::vector<YieldEntry>> nfy_;
 
-  void decayTriplets(std::vector<Eigen::Triplet<double>>& t) const;
+  // `dropped` receives the number of decay daughters missing from the chain.
+  void decayTriplets(std::vector<Eigen::Triplet<double>>& t, int& dropped) const;
+
+  static void warnDroppedDaughters(int dropped);
 
   const YieldEntry* nearestEntry(const Zai& parent, double energy) const;
 
