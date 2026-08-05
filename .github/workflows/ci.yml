@@ -79,6 +79,32 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build --build-config Release --output-on-failure
 
+  eigen-fetch:
+    needs: format-check
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        eigen_tag: ["3.4.0", "5.0.1"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (deliberately no libeigen3-dev)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libgtest-dev
+
+      - name: Configure (Eigen ${{ matrix.eigen_tag }} via FetchContent)
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+                -DCRAM_EIGEN_GIT_TAG=${{ matrix.eigen_tag }}
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
   sanitizers:
     needs: format-check
     runs-on: ubuntu-24.04
