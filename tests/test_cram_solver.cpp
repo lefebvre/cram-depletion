@@ -1,7 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <cstddef>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 #include "bateman.hpp"
@@ -199,6 +203,80 @@ TEST(CramSolver, RepeatedRegionSweepStaysOnTheFastPath) {
     EXPECT_TRUE(solver.apply(unitFirst(4)).allFinite()) << "region " << r;
   }
   EXPECT_EQ(analyses, 1);
+}
+
+// --- decomposed prepare ----------------------------------------------------
+
+TEST(CramSolver, DecomposedPrepareMatchesPrepare) {
+  auto A = linearChain({0.07, 0.013, 0.004, 0.020, 0.0});
+  Eigen::VectorXd n0 = unitFirst(5);
+
+  CramSolver whole(CramOrder::CRAM48);
+  whole.prepare(A, 25.0);
+
+  CramSolver split(CramOrder::CRAM48);
+  split.beginPrepare(A, 25.0);
+  ASSERT_EQ(split.poleCount(), whole.poleCount());
+  for (std::size_t l = 0; l < split.poleCount(); ++l)
+    split.preparePole(l);
+  split.endPrepare();
+  ASSERT_TRUE(split.prepared());
+
+  const Eigen::VectorXd a = whole.apply(n0);
+  const Eigen::VectorXd b = split.apply(n0);
+  for (int i = 0; i < a.size(); ++i) {
+    EXPECT_DOUBLE_EQ(a(i), b(i)) << "index " << i;
+  }
+}
+
+TEST(CramSolver, PreparePoleOutsideBeginEndThrows) {
+  CramSolver solver(CramOrder::CRAM48);
+  EXPECT_THROW(solver.preparePole(0), std::logic_error);
+  EXPECT_THROW(solver.endPrepare(), std::logic_error);
+}
+
+TEST(CramSolver, PreparePoleRejectsOutOfRangeIndex) {
+  auto A = linearChain({0.1, 0.0});
+  CramSolver solver(CramOrder::CRAM48);
+  solver.beginPrepare(A, 1.0);
+  EXPECT_THROW(solver.preparePole(solver.poleCount()), std::out_of_range);
+}
+
+// Drives the poles from several threads at once, which is the whole point of
+// the decomposition. Under the ThreadSanitizer CI job this is what proves the
+// concurrency claim in the header; without TSan it still checks that a
+// thread-driven prepare produces exactly the sequential answer.
+TEST(CramSolver, ConcurrentPreparePoleMatchesSequential) {
+  auto A = linearChain({0.07, 0.013, 0.004, 0.020, 0.008, 0.0});
+  Eigen::VectorXd n0 = unitFirst(6);
+  const double dt = 3600.0;
+
+  CramSolver sequential(CramOrder::CRAM48);
+  sequential.prepare(A, dt);
+
+  CramSolver threaded(CramOrder::CRAM48);
+  threaded.beginPrepare(A, dt);
+
+  const std::size_t poles = threaded.poleCount();
+  const unsigned hw = std::max(2u, std::min(8u, std::thread::hardware_concurrency()));
+  std::atomic<std::size_t> next{0};
+  std::vector<std::thread> workers;
+  workers.reserve(hw);
+  for (unsigned w = 0; w < hw; ++w) {
+    workers.emplace_back([&] {
+      for (std::size_t l = next++; l < poles; l = next++)
+        threaded.preparePole(l);
+    });
+  }
+  for (auto& t : workers)
+    t.join();
+  threaded.endPrepare();
+
+  const Eigen::VectorXd a = sequential.apply(n0);
+  const Eigen::VectorXd b = threaded.apply(n0);
+  for (int i = 0; i < a.size(); ++i) {
+    EXPECT_DOUBLE_EQ(a(i), b(i)) << "index " << i;
+  }
 }
 
 // Step-by-step parity with cramSolve over a long march. Both paths perform

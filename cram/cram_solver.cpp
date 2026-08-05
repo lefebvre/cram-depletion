@@ -39,51 +39,81 @@ void CramSolver::recordPattern(const Eigen::SparseMatrix<cd>& m) {
   patternInner_.assign(m.innerIndexPtr(), m.innerIndexPtr() + m.nonZeros());
 }
 
-void CramSolver::prepare(const Eigen::SparseMatrix<double>& A, double dt) {
+void CramSolver::beginPrepare(const Eigen::SparseMatrix<double>& A, double dt) {
   if (A.rows() != A.cols())
     throw std::invalid_argument("cram: CramSolver::prepare requires square A");
 
   n_ = static_cast<int>(A.rows());
   prepared_ = false;
 
-  const Eigen::SparseMatrix<cd> Adt = (A.cast<cd>() * cd(dt, 0.0)).eval();
-  Eigen::SparseMatrix<cd> I(n_, n_);
-  I.setIdentity();
+  scaled_ = (A.cast<cd>() * cd(dt, 0.0)).eval();
 
   // The sparsity of (A*dt - theta_l*I) is identical for every pole, so one
-  // pole matrix settles the pattern question for all of them. Compare against
-  // the last prepared pattern before touching any solver: if it still holds,
-  // every pole's symbolic analysis is still valid and only the numeric
-  // factorization has to be redone. On a many-region sweep, where each region
-  // shares the chain's topology and differs only in reaction rates, that is
-  // the difference between analyzing once and analyzing once per region.
-  Eigen::SparseMatrix<cd> M0 = Adt - (theta_[0] * I);
+  // pole matrix settles the pattern question for all of them. Decide reuse
+  // here, before any pole is touched, so the pole loop reads a value nobody
+  // writes -- which is what lets those calls run concurrently.
+  Eigen::SparseMatrix<cd> I(n_, n_);
+  I.setIdentity();
+  Eigen::SparseMatrix<cd> M0 = scaled_ - (theta_[0] * I);
   M0.makeCompressed();
-  const bool reuse = symbolicValid_ && patternMatches(M0);
+  reuseSymbolic_ = symbolicValid_ && patternMatches(M0);
+  if (!reuseSymbolic_)
+    recordPattern(M0);
 
   // A failed factorization leaves the symbolic state untrustworthy, so drop it
-  // up front and only reinstate it once every pole has gone through cleanly.
+  // up front and only reinstate it in endPrepare() once every pole is clean.
   symbolicValid_ = false;
+  poleOk_.assign(theta_.size(), 0);
+  preparing_ = true;
+}
 
-  for (std::size_t l = 0; l < theta_.size(); ++l) {
-    // Each pole keeps its own SparseLU because the numeric factorization
-    // depends on theta_l; only the symbolic half is shared.
-    Eigen::SparseMatrix<cd> M = (l == 0) ? M0 : (Adt - (theta_[l] * I));
-    if (l != 0)
-      M.makeCompressed();
-    auto& lu = *lus_[l];
-    if (!reuse)
-      lu.analyzePattern(M);
-    lu.factorize(M);
-    if (lu.info() != Eigen::Success)
+void CramSolver::preparePole(std::size_t pole) {
+  if (!preparing_)
+    throw std::logic_error("cram: CramSolver::preparePole called outside begin/endPrepare");
+  if (pole >= theta_.size())
+    throw std::out_of_range("cram: CramSolver::preparePole index out of range");
+
+  // Built locally so concurrent calls share nothing writable. Each pole keeps
+  // its own SparseLU because the numeric factorization depends on theta_l;
+  // only the symbolic half is common to all of them.
+  Eigen::SparseMatrix<cd> I(n_, n_);
+  I.setIdentity();
+  Eigen::SparseMatrix<cd> M = scaled_ - (theta_[pole] * I);
+  M.makeCompressed();
+
+  auto& lu = *lus_[pole];
+  if (!reuseSymbolic_)
+    lu.analyzePattern(M);
+  lu.factorize(M);
+  // Reported rather than thrown: an exception escaping a caller's parallel
+  // region would terminate. endPrepare() raises it on the calling thread.
+  poleOk_[pole] = (lu.info() == Eigen::Success) ? 1u : 0u;
+}
+
+void CramSolver::endPrepare() {
+  if (!preparing_)
+    throw std::logic_error("cram: CramSolver::endPrepare called without beginPrepare");
+  preparing_ = false;
+
+  for (std::size_t l = 0; l < poleOk_.size(); ++l) {
+    if (poleOk_[l] == 0u) {
+      scaled_.resize(0, 0);
       throw std::runtime_error("cram: SparseLU factorization failed in CramSolver::prepare");
+    }
   }
 
-  if (!reuse)
-    recordPattern(M0);
+  // The scaled matrix is only needed while poles are being factorized. Dropping
+  // it here keeps a per-thread solver's footprint to the K factorizations.
+  scaled_.resize(0, 0);
   symbolicValid_ = true;
-  reusedSymbolic_ = reuse;
   prepared_ = true;
+}
+
+void CramSolver::prepare(const Eigen::SparseMatrix<double>& A, double dt) {
+  beginPrepare(A, dt);
+  for (std::size_t l = 0; l < theta_.size(); ++l)
+    preparePole(l);
+  endPrepare();
 }
 
 Eigen::VectorXd CramSolver::apply(const Eigen::VectorXd& n0) const {
