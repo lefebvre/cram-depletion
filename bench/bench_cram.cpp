@@ -16,9 +16,11 @@
 #include <benchmark/benchmark.h>
 
 #include "acyclic_chain.hpp"
+#include "cram/chain.hpp"
 #include "cram/cram.hpp"
 #include "cram/cram_solver.hpp"
 #include "cyclic_chain.hpp"
+#include "synthetic_depletion_chain.hpp"
 
 namespace {
 
@@ -190,5 +192,37 @@ BENCHMARK(BM_CramSolverCached<Shape::Burnup>)
     ->Args({1675, 20})
     ->Args({1675, 100})
     ->Unit(benchmark::kMillisecond);
+
+// --- matrix assembly -------------------------------------------------------
+// Assembly runs as often as the solver does: once per depletion region, again
+// every burnup step. These cover the two paths -- decay transitions, which walk
+// every mode of every nuclide, and the fission source, which walks a yield
+// table of ~1000 products per parent.
+
+void BM_DecayMatrixAssembly(benchmark::State& state) {
+  const int n = static_cast<int>(state.range(0));
+  const auto fixture = cram_test::buildSyntheticDepletionChain(n);
+
+  for (auto _ : state) {
+    auto A = fixture.chain.decayMatrix();
+    benchmark::DoNotOptimize(A);
+  }
+  state.counters["nuclides"] = fixture.chain.size();
+}
+BENCHMARK(BM_DecayMatrixAssembly)->Arg(256)->Arg(1024)->Arg(1675);
+
+void BM_FissionSourceAssembly(benchmark::State& state) {
+  const int n = static_cast<int>(state.range(0));
+  const auto fixture = cram_test::buildSyntheticDepletionChain(n);
+
+  for (auto _ : state) {
+    std::vector<Eigen::Triplet<double>> triplets;
+    for (const auto& parent : fixture.fissionParents)
+      fixture.chain.addFissionSource(triplets, parent, 1.0e-8, 0.0253);
+    benchmark::DoNotOptimize(triplets);
+  }
+  state.counters["parents"] = static_cast<double>(fixture.fissionParents.size());
+}
+BENCHMARK(BM_FissionSourceAssembly)->Arg(256)->Arg(1024)->Arg(1675);
 
 }  // namespace

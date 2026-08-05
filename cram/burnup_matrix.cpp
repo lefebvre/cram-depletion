@@ -36,9 +36,14 @@ void DepletionChain::setDecay(const Zai& z, DecayData d) {
 
 void DepletionChain::addFissionYields(const Zai& parent, FissionYields y) {
   add(parent);
-  for (auto& [p, _] : y.products)
-    add(p);
-  nfy_[parent.key()].push_back(std::move(y));
+  YieldEntry entry;
+  entry.resolved.reserve(y.products.size());
+  // add() registers the product and returns its index in one step, so the
+  // matrix index is known here and never has to be looked up during assembly.
+  for (const auto& [p, yield] : y.products)
+    entry.resolved.emplace_back(add(p), yield);
+  entry.yields = std::move(y);
+  nfy_[parent.key()].push_back(std::move(entry));
 }
 
 const DecayData* DepletionChain::decay(const Zai& z) const {
@@ -76,20 +81,26 @@ int DepletionChain::close() {
   return added;
 }
 
-const FissionYields* DepletionChain::nearestYields(const Zai& parent, double energy) const {
+const DepletionChain::YieldEntry* DepletionChain::nearestEntry(const Zai& parent,
+                                                               double energy) const {
   auto it = nfy_.find(parent.key());
   if (it == nfy_.end() || it->second.empty())
     return nullptr;
-  const FissionYields* best = nullptr;
+  const YieldEntry* best = nullptr;
   double bestDist = std::numeric_limits<double>::infinity();
-  for (const auto& y : it->second) {
-    double d = std::abs(y.energy - energy);
+  for (const auto& entry : it->second) {
+    double d = std::abs(entry.yields.energy - energy);
     if (d < bestDist) {
       bestDist = d;
-      best = &y;
+      best = &entry;
     }
   }
   return best;
+}
+
+const FissionYields* DepletionChain::nearestYields(const Zai& parent, double energy) const {
+  const YieldEntry* entry = nearestEntry(parent, energy);
+  return entry == nullptr ? nullptr : &entry->yields;
 }
 
 void DepletionChain::addReaction(std::vector<Eigen::Triplet<double>>& t, const Zai& parent,
@@ -107,20 +118,19 @@ void DepletionChain::addFissionSource(std::vector<Eigen::Triplet<double>>& t, co
   int ip = indexOf(parent);
   if (ip < 0 || fissionRate == 0.0)
     return;
-  const FissionYields* y = nearestYields(parent, energy);
-  if (y == nullptr)
+  const YieldEntry* entry = nearestEntry(parent, energy);
+  if (entry == nullptr)
     return;
   t.emplace_back(ip, ip, -fissionRate);  // parent consumed by fission
-  emitFissionProducts(t, ip, *y, fissionRate);
+  emitFissionProducts(t, ip, *entry, fissionRate);
 }
 
 void DepletionChain::emitFissionProducts(std::vector<Eigen::Triplet<double>>& t, int parentIndex,
-                                         const FissionYields& yields, double rate) const {
-  for (const auto& [prod, yield] : yields.products) {
-    int j = indexOf(prod);
-    if (j >= 0)
-      t.emplace_back(j, parentIndex, rate * yield);
-  }
+                                         const YieldEntry& entry, double rate) const {
+  // No index lookup and no validity check: addFissionYields() registered every
+  // product and recorded its index, so all of them are in the chain.
+  for (const auto& [j, yield] : entry.resolved)
+    t.emplace_back(j, parentIndex, rate * yield);
 }
 
 void DepletionChain::decayTriplets(std::vector<Eigen::Triplet<double>>& t) const {
@@ -142,8 +152,8 @@ void DepletionChain::decayTriplets(std::vector<Eigen::Triplet<double>>& t) const
         continue;
 
       if (m.isFission) {
-        if (const FissionYields* y = nearestYields(parent, 0.0))
-          emitFissionProducts(t, i, *y, rate);  // spontaneous fission
+        if (const YieldEntry* entry = nearestEntry(parent, 0.0))
+          emitFissionProducts(t, i, *entry, rate);  // spontaneous fission
         continue;
       }
 

@@ -3,11 +3,12 @@
 // Nuclide identity (Z, A, isomeric state) and the ENDF decay-mode
 // transition rules needed to figure out the daughter of a decay.
 //
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
-#include <vector>
 
 namespace cram {
 
@@ -56,8 +57,31 @@ enum class DecayParticle {
 //   1.4  -> beta- followed by alpha
 //   2.7  -> EC/beta+ followed by proton
 // Returns the ordered list of single-digit codes.
-inline std::vector<int> decayParticleSequence(double rtyp) {
-  std::vector<int> seq;
+//
+// Fixed capacity rather than a std::vector: this is called once per decay mode
+// every time a burnup matrix is assembled, and a model with many depletion
+// regions assembles one matrix per region. A full ENDF/B-VIII decay sublibrary
+// runs to ~3800 nuclides with a few modes each, so a heap allocation here costs
+// on the order of 10^4 allocations per matrix build, repeated per region. The
+// sequence can never exceed nine entries -- the integer part plus the eight
+// fractional digits kScale resolves -- so it fits in the object.
+class DecaySequence {
+public:
+  void push(int code) { codes_[static_cast<std::size_t>(count_++)] = code; }
+  const int* begin() const { return codes_.data(); }
+  const int* end() const { return codes_.data() + count_; }
+  int size() const { return count_; }
+  bool empty() const { return count_ == 0; }
+  int operator[](int i) const { return codes_[static_cast<std::size_t>(i)]; }
+
+private:
+  static constexpr int kMaxCodes = 9;
+  std::array<int, kMaxCodes> codes_{};
+  int count_ = 0;
+};
+
+inline DecaySequence decayParticleSequence(double rtyp) {
+  DecaySequence seq;
   if (!(rtyp >= 0.0))
     return seq;
   // Scale by 1e8 (the precision the rest of ENDF uses for similar fields) and
@@ -66,7 +90,7 @@ inline std::vector<int> decayParticleSequence(double rtyp) {
   constexpr std::int64_t kScale = 100000000;  // 10^8
   const std::int64_t scaled = std::llround(rtyp * static_cast<double>(kScale));
   const std::int64_t ipart = scaled / kScale;
-  seq.push_back(static_cast<int>(ipart));
+  seq.push(static_cast<int>(ipart));
   std::int64_t frac = scaled - ipart * kScale;
   if (frac == 0)
     return seq;
@@ -79,7 +103,7 @@ inline std::vector<int> decayParticleSequence(double rtyp) {
   std::int64_t divisor = kScale / 10;  // 10^7
   for (int k = 0; k < digitsToEmit; ++k) {
     const int d = static_cast<int>(frac / divisor);
-    seq.push_back(d);
+    seq.push(d);
     frac -= static_cast<std::int64_t>(d) * divisor;
     divisor /= 10;
   }

@@ -117,6 +117,26 @@ public:
   // beginPrepare() returns and only read thereafter. Two concurrent calls with
   // the same index are a data race.
 
+  // -- Memory --------------------------------------------------------------
+  //
+  // A prepared solver holds K complex LU factorizations at once — 8 for
+  // CRAM16, 24 for CRAM48 — and each is larger than the matrix it came from,
+  // by the fill-in ratio. For a burnup matrix that ratio was measured at
+  // 2.2-2.5x and grows with N; for an acyclic decay-only matrix it is ~1.6x
+  // and flat. So the resident cost is roughly
+  //
+  //     K * fill * nnz(A) * sizeof(std::complex<double>)
+  //
+  // which at N~1700 and CRAM48 is on the order of a few MB per solver. This is
+  // usually the binding constraint before CPU time is.
+  //
+  // It also decides how to structure a many-region sweep. Do not hold a solver
+  // per region: a million regions at a few MB each is not storable. Hold one
+  // per worker thread and re-prepare it for each region in turn, which bounds
+  // the total at threads * K factorizations rather than regions * K, and has
+  // the further advantage that consecutive regions sharing a chain topology
+  // reuse the symbolic analysis (see prepare()).
+
 private:
   using cd = std::complex<double>;
   using StorageIndex = Eigen::SparseMatrix<cd>::StorageIndex;
