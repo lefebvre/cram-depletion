@@ -118,6 +118,89 @@ TEST(CramSolver, OrderIsRetained) {
   EXPECT_EQ(CramSolver(CramOrder::CRAM48).order(), CramOrder::CRAM48);
 }
 
+// --- symbolic analysis reuse ----------------------------------------------
+// The many-region case: every depletion region shares the chain's topology and
+// differs only in reaction rates, so re-preparing the same solver region after
+// region should analyze the sparsity once and refactorize numerically each time.
+
+TEST(CramSolver, ReusesSymbolicAnalysisWhenPatternIsUnchanged) {
+  auto A1 = linearChain({0.07, 0.013, 0.004, 0.0});
+  auto A2 = linearChain({0.05, 0.020, 0.009, 0.0});  // same pattern, new values
+
+  CramSolver solver(CramOrder::CRAM48);
+  solver.prepare(A1, 10.0);
+  EXPECT_FALSE(solver.reusedSymbolicAnalysis()) << "nothing to reuse on the first prepare";
+  solver.prepare(A2, 10.0);
+  EXPECT_TRUE(solver.reusedSymbolicAnalysis());
+}
+
+TEST(CramSolver, SymbolicReuseDoesNotChangeResults) {
+  auto A1 = linearChain({0.07, 0.013, 0.004, 0.0});
+  auto A2 = linearChain({0.05, 0.020, 0.009, 0.0});
+  Eigen::VectorXd n0 = unitFirst(4);
+
+  // Same final matrix reached two ways: once through a solver that had already
+  // analyzed a matching pattern, once through a solver seeing it cold.
+  CramSolver reused(CramOrder::CRAM48);
+  reused.prepare(A1, 10.0);
+  reused.prepare(A2, 10.0);
+  ASSERT_TRUE(reused.reusedSymbolicAnalysis());
+
+  CramSolver fresh(CramOrder::CRAM48);
+  fresh.prepare(A2, 10.0);
+  ASSERT_FALSE(fresh.reusedSymbolicAnalysis());
+
+  const Eigen::VectorXd viaReuse = reused.apply(n0);
+  const Eigen::VectorXd viaFresh = fresh.apply(n0);
+  ASSERT_EQ(viaReuse.size(), viaFresh.size());
+  for (int i = 0; i < viaReuse.size(); ++i) {
+    EXPECT_DOUBLE_EQ(viaReuse(i), viaFresh(i)) << "index " << i;
+  }
+}
+
+TEST(CramSolver, FallsBackToFullAnalysisWhenSizeChanges) {
+  auto small = linearChain({0.07, 0.013, 0.0});
+  auto large = linearChain({0.07, 0.013, 0.004, 0.0});
+
+  CramSolver solver(CramOrder::CRAM48);
+  solver.prepare(small, 10.0);
+  solver.prepare(large, 10.0);
+  EXPECT_FALSE(solver.reusedSymbolicAnalysis());
+  EXPECT_EQ(solver.size(), 4);
+}
+
+TEST(CramSolver, FallsBackToFullAnalysisWhenSparsityChanges) {
+  // Same size, same nonzero count, but one off-diagonal moved: the pattern
+  // check has to catch this, not just compare dimensions.
+  std::vector<Eigen::Triplet<double>> t1{{0, 0, -0.1}, {1, 0, 0.1}, {1, 1, -0.2}, {2, 1, 0.2}};
+  std::vector<Eigen::Triplet<double>> t2{{0, 0, -0.1}, {2, 0, 0.1}, {1, 1, -0.2}, {2, 1, 0.2}};
+  Eigen::SparseMatrix<double> A1(3, 3);
+  Eigen::SparseMatrix<double> A2(3, 3);
+  A1.setFromTriplets(t1.begin(), t1.end());
+  A2.setFromTriplets(t2.begin(), t2.end());
+
+  CramSolver solver(CramOrder::CRAM48);
+  solver.prepare(A1, 10.0);
+  solver.prepare(A2, 10.0);
+  EXPECT_FALSE(solver.reusedSymbolicAnalysis());
+}
+
+TEST(CramSolver, RepeatedRegionSweepStaysOnTheFastPath) {
+  // Ten "regions": one topology, ten different rate sets. Only the first
+  // should pay for the symbolic analysis.
+  CramSolver solver(CramOrder::CRAM48);
+  int analyses = 0;
+  for (int r = 0; r < 10; ++r) {
+    const double scale = 1.0 + 0.1 * r;
+    auto A = linearChain({0.07 * scale, 0.013 * scale, 0.004 * scale, 0.0});
+    solver.prepare(A, 10.0);
+    if (!solver.reusedSymbolicAnalysis())
+      ++analyses;
+    EXPECT_TRUE(solver.apply(unitFirst(4)).allFinite()) << "region " << r;
+  }
+  EXPECT_EQ(analyses, 1);
+}
+
 // Step-by-step parity with cramSolve over a long march. Both paths perform
 // the same arithmetic in the same order, so the inventories should stay
 // bit-identical (or within rounding noise) across every step. If this test

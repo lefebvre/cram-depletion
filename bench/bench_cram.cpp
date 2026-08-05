@@ -87,6 +87,37 @@ BENCHMARK(BM_CramSolverPrepare<Shape::Burnup>)
     ->Arg(1675)
     ->Unit(benchmark::kMillisecond);
 
+// The many-region sweep: one solver reused across regions that share a chain
+// topology, so every prepare() after the first reuses the symbolic analysis and
+// pays only the numeric factorization. Compare against BM_CramSolverPrepare
+// above, which constructs a fresh solver each iteration and therefore always
+// takes the cold path. The gap is the symbolic analysis.
+template <Shape S>
+void BM_CramSolverRepreparePreanalyzed(benchmark::State& state) {
+  const int n = static_cast<int>(state.range(0));
+  const auto chain = buildChain<S>(n);
+  cram::CramSolver solver(cram::CramOrder::CRAM48);
+  solver.prepare(chain.A, kDay);  // cold prepare kept out of the timed region
+
+  for (auto _ : state) {
+    solver.prepare(chain.A, kDay);
+    benchmark::DoNotOptimize(solver);
+  }
+  if (!solver.reusedSymbolicAnalysis())
+    state.SkipWithError("expected the symbolic analysis to be reused");
+  state.SetLabel(shapeName(S));
+}
+BENCHMARK(BM_CramSolverRepreparePreanalyzed<Shape::DecayOnly>)
+    ->Arg(256)
+    ->Arg(1024)
+    ->Arg(1675)
+    ->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_CramSolverRepreparePreanalyzed<Shape::Burnup>)
+    ->Arg(256)
+    ->Arg(1024)
+    ->Arg(1675)
+    ->Unit(benchmark::kMillisecond);
+
 // Solves from the same input vector every iteration rather than marching, so
 // the inventory cannot decay into denormals and skew the timing.
 template <Shape S>
