@@ -47,8 +47,9 @@ TEST(CramSolver, MatchesFreeFunction) {
   Eigen::VectorXd direct = cramSolve(A, n0, dt, CramOrder::CRAM48);
 
   ASSERT_EQ(cached.size(), direct.size());
-  for (int i = 0; i < cached.size(); ++i)
+  for (int i = 0; i < cached.size(); ++i) {
     EXPECT_NEAR(cached(i), direct(i), 1e-12) << "index " << i;
+  }
 }
 
 TEST(CramSolver, RepeatedApplyMarchesCorrectly) {
@@ -66,8 +67,9 @@ TEST(CramSolver, RepeatedApplyMarchesCorrectly) {
   y = solver.apply(y);  // two dt sub-steps
 
   auto ref = batemanLinearChain(lam, 2.0 * dt);
-  for (std::size_t i = 0; i < ref.size(); ++i)
+  for (std::size_t i = 0; i < ref.size(); ++i) {
     EXPECT_NEAR(y(i), ref[i], 1e-9 * std::max(1.0, std::abs(ref[i])));
+  }
 }
 
 TEST(CramSolver, RePrepareSwitchesMatrix) {

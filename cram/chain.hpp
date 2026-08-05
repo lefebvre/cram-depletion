@@ -34,15 +34,18 @@ struct DecayData {
   double halfLife = 0.0;             // seconds; 0 or inf => stable
   double decayConstant = 0.0;        // ln(2)/halfLife; 0 if stable
   double gammaEnergyPerDecay = 0.0;  // average EM (gamma+X-ray) energy per decay [eV]
-  std::vector<DecayMode> modes;      // empty if stable
+  // The explicit initializer is what keeps designated-initializer construction
+  // (DecayData{.halfLife = ...}) free of -Wmissing-field-initializers: every
+  // other member has one, so GCC would flag this member alone.
+  std::vector<DecayMode> modes = {};  // empty if stable
 };
 
 // Independent fission yields for one parent at one incident energy.
 // (Use ENDF MT454 = independent yields, NOT MT459 = cumulative yields, when
 //  you model the full decay chain explicitly, otherwise you double count.)
 struct FissionYields {
-  double energy = 0.0;                           // incident neutron energy [eV]; 0 => spontaneous
-  std::vector<std::pair<Zai, double>> products;  // (product, yield per fission)
+  double energy = 0.0;  // incident neutron energy [eV]; 0 => spontaneous
+  std::vector<std::pair<Zai, double>> products = {};  // (product, yield per fission)
 };
 
 class DepletionChain {
