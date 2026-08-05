@@ -50,7 +50,7 @@ public:
   // True if the most recent prepare() was able to reuse the symbolic analysis
   // from the one before it. Exposed for tests and for callers who want to
   // confirm their region loop is actually hitting the fast path.
-  bool reusedSymbolicAnalysis() const { return reusedSymbolic_; }
+  bool reusedSymbolicAnalysis() const { return reuseSymbolic_; }
 
   // Apply the cached exp(A*dt) operator to n0. n0.size() must match the
   // size of A passed to the most recent prepare().
@@ -64,14 +64,58 @@ public:
   CramOrder order() const { return order_; }
   bool prepared() const { return prepared_; }
 
+  // -- Decomposed prepare, for callers that want to parallelize over poles --
+  //
+  // prepare() is the sequential composition of the three calls below. They are
+  // separated so a caller can drive the K independent factorizations with its
+  // own executor:
+  //
+  //   solver.beginPrepare(A, dt);
+  //   #pragma omp parallel for                       // or TBB, std::async, ...
+  //   for (int l = 0; l < (int)solver.poleCount(); ++l)
+  //     solver.preparePole(l);
+  //   solver.endPrepare();
+  //
+  // This library deliberately spawns no threads of its own. Where parallelism
+  // belongs depends on the problem: a model with many depletion regions has one
+  // burnup matrix per region and is parallel across regions by millions, so
+  // region-level threading saturates the machine on its own and pole-level
+  // threading underneath it would only oversubscribe — K threads per region
+  // thread, competing for cache and fighting whatever affinity the host set.
+  // Pole-level parallelism earns its keep in the opposite case: one or a few
+  // very large regions, where there is nothing else to spread across cores.
+  // Only the caller knows which case it is in, so only the caller decides.
+  //
+  // Keeping the threads outside also means this library imposes no parallel
+  // runtime on its dependents, and stays usable inside an MPI rank or an
+  // existing OpenMP region where the host owns the thread budget.
+  //
+  // preparePole() reports failures through endPrepare() rather than throwing,
+  // because an exception escaping an OpenMP parallel region terminates. The
+  // one precondition it does throw on — being called outside a
+  // beginPrepare()/endPrepare() pair — is a programming error that surfaces
+  // deterministically on the first call.
+  std::size_t poleCount() const { return theta_.size(); }
+  void beginPrepare(const Eigen::SparseMatrix<double>& A, double dt);
+  void preparePole(std::size_t pole);
+  void endPrepare();
+
   // -- Thread-safety ------------------------------------------------------
   //
-  // A single CramSolver instance is NOT thread-safe. prepare() mutates the
-  // cache; apply() reads cached Eigen::SparseLU state that is not safe to
-  // share across threads (the underlying SuperNodalMatrix workspace is
-  // touched on every solve). To parallelize, construct one CramSolver per
-  // thread — the pole tables themselves are immutable shared constants, so
-  // there is no contention between instances.
+  // A single CramSolver instance is NOT thread-safe, with one deliberate
+  // exception. prepare() mutates the cache; apply() reads cached
+  // Eigen::SparseLU state that is not safe to share across threads (the
+  // underlying SuperNodalMatrix workspace is touched on every solve). To
+  // parallelize across regions, construct one CramSolver per thread — the pole
+  // tables themselves are immutable shared constants, so there is no
+  // contention between instances.
+  //
+  // The exception: between beginPrepare() and endPrepare(), calls to
+  // preparePole() with *distinct* pole indices may run concurrently. Each pole
+  // owns its own SparseLU and its own status slot, and everything they share —
+  // the scaled matrix, the pole tables, the reuse decision — is written before
+  // beginPrepare() returns and only read thereafter. Two concurrent calls with
+  // the same index are a data race.
 
 private:
   using cd = std::complex<double>;
@@ -90,8 +134,15 @@ private:
   std::vector<cd> alpha_;
   std::vector<StorageIndex> patternOuter_;
   std::vector<StorageIndex> patternInner_;
+  // Written by beginPrepare(), read-only for the duration of the pole loop.
+  Eigen::SparseMatrix<cd> scaled_;  // A * dt, promoted to complex
+  bool preparing_ = false;
+  bool reuseSymbolic_ = false;
+  // One slot per pole so concurrent preparePole() calls never write the same
+  // byte. Deliberately not std::vector<bool>: its bit-packing makes concurrent
+  // writes to distinct elements a data race.
+  std::vector<unsigned char> poleOk_;
   bool symbolicValid_ = false;
-  bool reusedSymbolic_ = false;
   // One SparseLU per pole. We can't keep these in a std::vector of value
   // type because Eigen::SparseLU is non-copyable / non-movable in the
   // assignment sense we'd want — use unique_ptr to give us stable storage.

@@ -146,6 +146,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake g++ libeigen3-dev libgtest-dev
+      # Kernels since ~6.6 hand out more ASLR entropy than ThreadSanitizer's
+      # shadow mapping allows for, and it aborts at startup with "unexpected
+      # memory mapping" before running a line of test code. Lowering the
+      # randomisation is the documented fix. Tolerated if it fails, since the
+      # setting is unnecessary on kernels that never had the problem.
+      - name: Widen TSan's address space
+        run: sudo sysctl -w vm.mmap_rnd_bits=28 || true
       - name: Build + test with TSan
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCRAM_ENABLE_TSAN=ON \
