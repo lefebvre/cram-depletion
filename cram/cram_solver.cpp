@@ -23,6 +23,22 @@ CramSolver::CramSolver(CramOrder order) : order_(order) {
                 [] { return std::make_unique<Eigen::SparseLU<Eigen::SparseMatrix<cd>>>(); });
 }
 
+bool CramSolver::patternMatches(const Eigen::SparseMatrix<cd>& m) const {
+  if (patternOuter_.empty())
+    return false;
+  if (static_cast<std::size_t>(m.outerSize()) + 1 != patternOuter_.size())
+    return false;
+  if (static_cast<std::size_t>(m.nonZeros()) != patternInner_.size())
+    return false;
+  return std::equal(patternOuter_.begin(), patternOuter_.end(), m.outerIndexPtr()) &&
+         std::equal(patternInner_.begin(), patternInner_.end(), m.innerIndexPtr());
+}
+
+void CramSolver::recordPattern(const Eigen::SparseMatrix<cd>& m) {
+  patternOuter_.assign(m.outerIndexPtr(), m.outerIndexPtr() + m.outerSize() + 1);
+  patternInner_.assign(m.innerIndexPtr(), m.innerIndexPtr() + m.nonZeros());
+}
+
 void CramSolver::prepare(const Eigen::SparseMatrix<double>& A, double dt) {
   if (A.rows() != A.cols())
     throw std::invalid_argument("cram: CramSolver::prepare requires square A");
@@ -34,20 +50,39 @@ void CramSolver::prepare(const Eigen::SparseMatrix<double>& A, double dt) {
   Eigen::SparseMatrix<cd> I(n_, n_);
   I.setIdentity();
 
-  // The sparsity of (A*dt - theta_l*I) is identical for every pole, but each
-  // pole holds its own SparseLU instance because the numerical factorization
-  // depends on theta_l. analyzePattern still costs negligibly compared to
-  // factorize, and keeping per-pole solvers means apply() never has to
-  // rebuild M.
+  // The sparsity of (A*dt - theta_l*I) is identical for every pole, so one
+  // pole matrix settles the pattern question for all of them. Compare against
+  // the last prepared pattern before touching any solver: if it still holds,
+  // every pole's symbolic analysis is still valid and only the numeric
+  // factorization has to be redone. On a many-region sweep, where each region
+  // shares the chain's topology and differs only in reaction rates, that is
+  // the difference between analyzing once and analyzing once per region.
+  Eigen::SparseMatrix<cd> M0 = Adt - (theta_[0] * I);
+  M0.makeCompressed();
+  const bool reuse = symbolicValid_ && patternMatches(M0);
+
+  // A failed factorization leaves the symbolic state untrustworthy, so drop it
+  // up front and only reinstate it once every pole has gone through cleanly.
+  symbolicValid_ = false;
+
   for (std::size_t l = 0; l < theta_.size(); ++l) {
-    Eigen::SparseMatrix<cd> M = Adt - (theta_[l] * I);
-    M.makeCompressed();
+    // Each pole keeps its own SparseLU because the numeric factorization
+    // depends on theta_l; only the symbolic half is shared.
+    Eigen::SparseMatrix<cd> M = (l == 0) ? M0 : (Adt - (theta_[l] * I));
+    if (l != 0)
+      M.makeCompressed();
     auto& lu = *lus_[l];
-    lu.analyzePattern(M);
+    if (!reuse)
+      lu.analyzePattern(M);
     lu.factorize(M);
     if (lu.info() != Eigen::Success)
       throw std::runtime_error("cram: SparseLU factorization failed in CramSolver::prepare");
   }
+
+  if (!reuse)
+    recordPattern(M0);
+  symbolicValid_ = true;
+  reusedSymbolic_ = reuse;
   prepared_ = true;
 }
 
