@@ -123,6 +123,10 @@ Eigen::VectorXd CramSolver::apply(const Eigen::VectorXd& n0) const {
     throw std::invalid_argument("cram: CramSolver::apply n0.size() does not match prepared A");
 
   Eigen::VectorXd y = n0;
+  // This loop allocates two n-vectors per pole. Hoisting them into reusable
+  // member scratch was tried and measured no faster at N = 256, 1024 or 1675 --
+  // the triangular solves dominate so thoroughly that the allocations do not
+  // show above run-to-run noise -- so the simpler code stands.
   for (std::size_t l = 0; l < theta_.size(); ++l) {
     const auto& lu = *lus_[l];
     Eigen::VectorXcd x = lu.solve(y.cast<cd>());

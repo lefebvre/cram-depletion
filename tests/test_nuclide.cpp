@@ -38,17 +38,32 @@ TEST(Zai, HashUsableInMap) {
 // ---------------------------------------------------------------------------
 // RTYP decode
 // ---------------------------------------------------------------------------
+namespace {
+// decayParticleSequence returns a fixed-capacity sequence rather than a vector;
+// materialise it so the expectations below stay readable.
+std::vector<int> codes(double rtyp) {
+  const auto seq = decayParticleSequence(rtyp);
+  return std::vector<int>(seq.begin(), seq.end());
+}
+}  // namespace
+
 TEST(DecaySequence, SingleParticle) {
-  EXPECT_EQ(decayParticleSequence(1.0), (std::vector<int>{1}));
-  EXPECT_EQ(decayParticleSequence(4.0), (std::vector<int>{4}));
-  EXPECT_EQ(decayParticleSequence(6.0), (std::vector<int>{6}));
+  EXPECT_EQ(codes(1.0), (std::vector<int>{1}));
+  EXPECT_EQ(codes(4.0), (std::vector<int>{4}));
+  EXPECT_EQ(codes(6.0), (std::vector<int>{6}));
 }
 
 TEST(DecaySequence, MultiParticle) {
-  EXPECT_EQ(decayParticleSequence(1.5), (std::vector<int>{1, 5}));  // beta- , delayed n
-  EXPECT_EQ(decayParticleSequence(1.4), (std::vector<int>{1, 4}));  // beta- , alpha
-  EXPECT_EQ(decayParticleSequence(2.7), (std::vector<int>{2, 7}));  // EC , proton
-  EXPECT_EQ(decayParticleSequence(1.55), (std::vector<int>{1, 5, 5}));
+  EXPECT_EQ(codes(1.5), (std::vector<int>{1, 5}));  // beta- , delayed n
+  EXPECT_EQ(codes(1.4), (std::vector<int>{1, 4}));  // beta- , alpha
+  EXPECT_EQ(codes(2.7), (std::vector<int>{2, 7}));  // EC , proton
+  EXPECT_EQ(codes(1.55), (std::vector<int>{1, 5, 5}));
+}
+
+TEST(DecaySequence, NeverExceedsItsFixedCapacity) {
+  // 1.23456789 decodes to the integer part plus all eight fractional digits,
+  // which is the longest sequence RTYP can encode at kScale = 1e8.
+  EXPECT_EQ(decayParticleSequence(1.23456789).size(), 9);
 }
 
 TEST(DecaySequence, NegativeRtypIsEmpty) {

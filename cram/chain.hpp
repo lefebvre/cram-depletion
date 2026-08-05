@@ -103,17 +103,33 @@ public:
   Eigen::SparseMatrix<double> finalize(std::vector<Eigen::Triplet<double>> triplets) const;
 
 private:
+  // A yield set together with its products already resolved to matrix indices.
+  //
+  // addFissionYields() registers every product anyway, and add() hands back the
+  // index while doing so, so the resolution is free at insert time. Doing it
+  // there instead of during assembly removes a hash lookup per product from the
+  // hottest loop in matrix building: a full NFY table runs to ~1000 products per
+  // fissioning parent, across tens of parents, rebuilt for every depletion
+  // region. Indices are stable because nuclides_ only ever grows and add()
+  // never reorders it.
+  struct YieldEntry {
+    FissionYields yields;                          // as supplied; nearestYields() hands this back
+    std::vector<std::pair<int, double>> resolved;  // (matrix index, yield per fission)
+  };
+
   std::vector<Zai> nuclides_;
   std::unordered_map<std::int64_t, int> index_;
   std::unordered_map<std::int64_t, DecayData> decay_;
-  std::unordered_map<std::int64_t, std::vector<FissionYields>> nfy_;
+  std::unordered_map<std::int64_t, std::vector<YieldEntry>> nfy_;
 
   void decayTriplets(std::vector<Eigen::Triplet<double>>& t) const;
+
+  const YieldEntry* nearestEntry(const Zai& parent, double energy) const;
 
   // Emit production triplets for the given fission-yield set, each weighted by
   // `rate` * yield. Caller is responsible for the parent-removal term.
   void emitFissionProducts(std::vector<Eigen::Triplet<double>>& t, int parentIndex,
-                           const FissionYields& yields, double rate) const;
+                           const YieldEntry& entry, double rate) const;
 };
 
 }  // namespace cram
