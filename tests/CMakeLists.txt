@@ -15,7 +15,14 @@ include(GoogleTest)
 # distinguished from any test a dependency might register. (Eigen's own suite
 # is kept out entirely by forcing BUILD_TESTING off around its configure in
 # the top-level CMakeLists.txt.)
-gtest_discover_tests(unit_tests TEST_PREFIX cram.)
+# DISCOVERY_MODE PRE_TEST runs the enumeration at test time rather than as a
+# POST_BUILD step. Under a sanitizer the difference matters: ThreadSanitizer can
+# abort at startup on kernels that hand out more ASLR entropy than its shadow
+# mapping allows, and with POST_BUILD discovery that failure breaks the *build*
+# rather than the test run — intermittently, since it depends on where the
+# loader happens to land. Deferring discovery keeps a sanitizer build from
+# failing before anything has been run.
+gtest_discover_tests(unit_tests TEST_PREFIX cram. DISCOVERY_MODE PRE_TEST)
 
 # Integration test for the real ENDFtk reader. Built only with -DCRAM_WITH_ENDFTK.
 if(CRAM_WITH_ENDFTK)
@@ -23,5 +30,6 @@ if(CRAM_WITH_ENDFTK)
   target_link_libraries(integration_test PRIVATE cram cram_warning_flags GTest::gtest_main)
   gtest_discover_tests(integration_test
     TEST_PREFIX cram.
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/integration)
 endif()
