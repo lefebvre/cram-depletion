@@ -19,7 +19,9 @@ jobs:
             cram/*.hpp cram/*.cpp \
             cram-apps/*.cpp \
             tests/*.hpp tests/*.cpp \
-            tests/integration/*.cpp
+            tests/integration/*.cpp \
+            testing/*.hpp \
+            bench/*.cpp
 
   build-test-coverage:
     needs: format-check
@@ -33,10 +35,13 @@ jobs:
           sudo apt-get install -y cmake g++ libeigen3-dev libgtest-dev \
                                    gcovr cppcheck clang-tidy
 
-      - name: Configure (Debug + coverage)
+      # Benchmarks are built (not run) here so bench/ cannot bit-rot: it was
+      # previously compiled by no CI job at all. Timings are deliberately not
+      # gated -- hosted runners are far too noisy for that to mean anything.
+      - name: Configure (Debug + coverage + benchmarks)
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCRAM_ENABLE_COVERAGE=ON \
-                -DCRAM_WERROR=ON
+                -DCRAM_ENABLE_BENCHMARKS=ON -DCRAM_WERROR=ON
 
       - name: Build
         run: cmake --build build -j
