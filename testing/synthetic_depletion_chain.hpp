@@ -35,7 +35,11 @@ struct SyntheticDepletionChain {
 inline SyntheticDepletionChain buildSyntheticDepletionChain(int n, int fissionParents = 8,
                                                             int productsPerParent = 800,
                                                             unsigned seed = 20260804u) {
-  std::mt19937 rng(seed);
+  // Seeded as the other two fixtures are; see cyclic_chain.hpp for why the
+  // single-value mt19937 constructor is avoided.
+  std::seed_seq sequence{seed,        0x9e3779b9u, 0x85ebca6bu, 0xc2b2ae35u,
+                         0x27d4eb2fu, 0x165667b1u, 0xd3a2646cu, 0xfd7046c5u};
+  std::mt19937 rng(sequence);
   std::uniform_real_distribution<double> logHalfLife(1.0, 12.0);  // 10 s .. 1e12 s
   std::uniform_int_distribution<int> nModes(1, 3);
   std::uniform_int_distribution<int> rtypPick(0, 4);
