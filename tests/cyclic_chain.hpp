@@ -25,6 +25,7 @@
 //      linear-chain tests cover, but at N where fill-in is also in play.
 //
 #include <Eigen/SparseCore>
+#include <algorithm>
 #include <cmath>
 #include <random>
 #include <vector>
@@ -37,9 +38,13 @@ struct CyclicChain {
 };
 
 // Build an n x n cyclic burnup matrix. `seed` fixes the topology and the rates,
-// so the same (n, seed) always yields a bit-identical matrix on every platform:
-// std::mt19937 and the integer/real distributions used here are specified by the
-// standard, and no floating-point value depends on iteration order.
+// so the same (n, seed) yields a bit-identical matrix on every toolchain CI
+// exercises, which is what lets the frozen vectors in cram_golden_data.hpp be
+// checked in rather than regenerated per platform. No floating-point value here
+// depends on iteration order.
+//
+// That portability is verified rather than guaranteed by the standard; see the
+// note on the distributions below for what is and is not promised.
 inline CyclicChain buildCyclicChain(int n, unsigned seed = 20260804u) {
   // Seeded through std::seed_seq rather than mt19937's single-value constructor.
   // That constructor fills all 624 state words from one 32-bit value, so only
@@ -48,9 +53,21 @@ inline CyclicChain buildCyclicChain(int n, unsigned seed = 20260804u) {
   // ~2^256 states here and mixes them, at no runtime cost.
   //
   // Reproducibility is unaffected, which is what this fixture actually requires:
-  // both seed_seq's generate() and mt19937 are fully specified by the standard,
-  // so a given `seed` yields a bit-identical matrix on every implementation --
-  // which is what lets the frozen vectors in cram_golden_data.hpp be portable.
+  // seed_seq::generate() and mt19937 are both algorithm-specified, so the engine
+  // emits the same word sequence from a given `seed` on every implementation.
+  //
+  // The distributions below carry no such promise. [rand.dist.uni.int] and
+  // [rand.dist.uni.real] specify the distribution a generator produces, not the
+  // algorithm that produces it, so an implementation may consume a different
+  // number of engine words or map them differently -- and libstdc++, libc++ and
+  // the MSVC STL are known to differ in practice. A fixed engine sequence is
+  // therefore necessary for a portable golden vector but not sufficient.
+  //
+  // What actually makes cram_golden_data.hpp portable is that CI checks it: the
+  // golden test runs under libstdc++ and the MSVC STL on every push, so a
+  // divergence shows up as a test failure rather than silently. libc++ is not in
+  // the matrix; adding a macOS or -stdlib=libc++ job may well require
+  // regenerating the vectors, and the golden test is what will say so.
   //
   // The fixed words below are arbitrary mixing constants (golden ratio and
   // xxHash primes); they pad the entropy without making the stream depend on
@@ -64,7 +81,12 @@ inline CyclicChain buildCyclicChain(int n, unsigned seed = 20260804u) {
   std::uniform_int_distribution<int> hop(1, 4);
   std::uniform_real_distribution<double> branch(0.15, 1.0);
   std::uniform_int_distribution<int> stableRoll(0, 19);  // ~5% stable
-  std::uniform_int_distribution<int> lowIndex(0, (n / 4) - 1);
+  // The upper bound is clamped so the range stays valid at n < 4, where
+  // n/4 - 1 is -1: uniform_int_distribution requires a <= b, so that would be
+  // UB here at construction -- before any nuclide is drawn, and therefore even
+  // for n == 0, whose loops never run. For n >= 4 the range is exactly
+  // n/4 - 1 as before, so the draw sequence and the golden data are untouched.
+  std::uniform_int_distribution<int> lowIndex(0, std::max(1, n / 4) - 1);
 
   std::vector<Eigen::Triplet<double>> t;
   t.reserve(static_cast<std::size_t>(n) * 5);
@@ -101,8 +123,12 @@ inline CyclicChain buildCyclicChain(int n, unsigned seed = 20260804u) {
         j = 0;
       if (j >= n)
         j = n - 1;
-      if (j == i)  // never fold a branch into the diagonal
-        j = (i + 1 < n) ? i + 1 : i - 1;
+      // Never fold a branch into the diagonal: step up if there is room, else
+      // down. At n == 1 there is nowhere to go and the branch has to land on
+      // the diagonal -- taking i - 1 there would emit row -1. The column still
+      // sums to zero there, since the branch cancels the removal term.
+      if (j == i)
+        j = (i + 1 < n) ? i + 1 : (i > 0 ? i - 1 : i);
       targets.push_back(j);
     }
 
