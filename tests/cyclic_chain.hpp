@@ -77,7 +77,13 @@ inline CyclicChain buildCyclicChain(int n, unsigned seed = 20260804u) {
                          0x27d4eb2fu, 0x165667b1u, 0xd3a2646cu, 0xfd7046c5u};
   std::mt19937 rng(sequence);
   std::uniform_real_distribution<double> logLambda(-9.0, -1.0);  // 1e-9 .. 1e-1 /s
-  std::uniform_int_distribution<int> nModes(1, 3);
+  // std::size_t rather than the default int: this draw feeds `modes` below,
+  // which only ever counts and indexes std::vectors. The result type does not
+  // perturb the stream -- for a range this narrow libstdc++ and the MSVC STL
+  // both consume one engine word per attempt and reject on the same threshold
+  // whatever its width -- so the golden vectors are unaffected. That is
+  // measured, not promised; see the note above on what the standard specifies.
+  std::uniform_int_distribution<std::size_t> nModes(1, 3);
   std::uniform_int_distribution<int> hop(1, 4);
   std::uniform_real_distribution<double> branch(0.15, 1.0);
   std::uniform_int_distribution<int> stableRoll(0, 19);  // ~5% stable
@@ -98,11 +104,11 @@ inline CyclicChain buildCyclicChain(int n, unsigned seed = 20260804u) {
       continue;
 
     const double lambda = std::pow(10.0, logLambda(rng));
-    // std::size_t because `modes` and `k` only ever count and index the two
-    // std::vectors below. The nuclide indices (n, i, j) stay signed: `j` is
+    // `modes` and `k` only ever count and index the two std::vectors below, so
+    // both are std::size_t. The nuclide indices (n, i, j) stay signed: `j` is
     // deliberately negative in flight on the up-chain branch, `n` is compared
     // against it, and Eigen's Index and Triplet StorageIndex are signed too.
-    const std::size_t modes = static_cast<std::size_t>(nModes(rng));
+    const std::size_t modes = nModes(rng);
 
     // Daughters: alternate down-chain (decay) and up-chain ((n,gamma)-like) so
     // the matrix has entries on both sides of the diagonal, and every 16th
