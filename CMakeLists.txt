@@ -1,8 +1,11 @@
 cmake_minimum_required(VERSION 3.28)
-# VERSION feeds cramConfigVersion.cmake, so bumping it is what lets a consumer
-# write find_package(cram 0.1) and have the request actually checked. See the
-# compatibility note where that file is generated.
-project(cram_depletion VERSION 0.1.0 LANGUAGES CXX)
+# The single source of truth for cram's version. Three things derive from it and
+# nothing else declares one: cram/version.hpp (generated below), the
+# cramConfigVersion.cmake that answers find_package(cram <version>), and
+# `deplete --version`. The release tag is checked against it by the version-check
+# CI job, so a `git tag v1.0.2` without the matching bump here fails rather than
+# shipping a binary that misreports itself.
+project(cram_depletion VERSION 1.0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -185,6 +188,17 @@ else()
   endif()
 endif()
 
+# --- generated version header -----------------------------------------------
+# Written into the build tree rather than the source tree so the version can
+# never be edited in two places and drift. configure_file also makes the
+# generated header depend on both the template and the CMake run, so bumping
+# project(VERSION) rebuilds everything that includes it.
+set(CRAM_GENERATED_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cram/version.hpp.in
+  ${CRAM_GENERATED_INCLUDE_DIR}/cram/version.hpp
+  @ONLY)
+
 # --- core library -----------------------------------------------------------
 add_library(cram
   cram/cram.cpp
@@ -196,8 +210,12 @@ add_library(cram
 # install includedir once installed. A bare ${CMAKE_CURRENT_SOURCE_DIR} here
 # is not merely wrong for consumers but fatal: install(EXPORT) rejects an
 # absolute path into the source tree outright.
+# The generated include root carries cram/version.hpp only. Both roots collapse
+# to the same ${CMAKE_INSTALL_INCLUDEDIR} once installed, where the generated
+# header sits beside the checked-in ones.
 target_include_directories(cram PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+  $<BUILD_INTERFACE:${CRAM_GENERATED_INCLUDE_DIR}>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(cram PUBLIC Eigen3::Eigen cram_quality_flags)
 # BUILD_INTERFACE because our warning policy is a build-time concern that has no
@@ -373,6 +391,7 @@ if(CRAM_ENABLE_INSTALL)
     cram/chain.hpp
     cram/nuclide.hpp
     cram/endf_reader.hpp
+    ${CRAM_GENERATED_INCLUDE_DIR}/cram/version.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cram)
 
   install(EXPORT cramTargets
@@ -385,14 +404,14 @@ if(CRAM_ENABLE_INSTALL)
     ${CMAKE_CURRENT_BINARY_DIR}/cramConfig.cmake
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/cram)
 
-  # SameMinorVersion, not the more usual SameMajorVersion: before 1.0 the major
-  # is pinned at 0 and it is the minor that moves on a breaking change, so
-  # SameMajorVersion would declare every 0.x mutually compatible. This should
-  # become SameMajorVersion at 1.0.
+  # SameMajorVersion: past 1.0 the major is the breaking-change axis, so a
+  # consumer asking for 1.0 is satisfied by any 1.x at or above it. Accepting
+  # a *lower* patch is not possible either way -- the generated file always
+  # rejects a request newer than what is installed.
   write_basic_package_version_file(
     ${CMAKE_CURRENT_BINARY_DIR}/cramConfigVersion.cmake
     VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMinorVersion)
+    COMPATIBILITY SameMajorVersion)
 
   install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/cramConfig.cmake
