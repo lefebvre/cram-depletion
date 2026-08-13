@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.28)
-project(cram_depletion LANGUAGES CXX)
+# VERSION feeds cramConfigVersion.cmake, so bumping it is what lets a consumer
+# write find_package(cram 0.1) and have the request actually checked. See the
+# compatibility note where that file is generated.
+project(cram_depletion VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,6 +10,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
+
+# Defines CMAKE_INSTALL_INCLUDEDIR / LIBDIR / BINDIR. Included this early
+# because target_include_directories(cram) below needs INCLUDEDIR for its
+# INSTALL_INTERFACE, not just the install rules at the end of this file.
+include(GNUInstallDirs)
 
 # Cache FetchContent downloads outside the build tree so they survive
 # clean builds and can be shared across build directories.
@@ -29,6 +37,9 @@ option(CRAM_ENABLE_CLANG_TIDY "Run clang-tidy during the build"          OFF)
 # Off by default so a future compiler inventing a new warning never breaks a
 # user's build. CI turns it on, which is where new warnings must be caught.
 option(CRAM_WERROR           "Treat compiler warnings as errors"         OFF)
+# CRAM_ENABLE_INSTALL is declared further down: its default depends on whether
+# Eigen ends up found or fetched, which is not known until after the Eigen
+# block below.
 
 set(CRAM_EIGEN_MIN_VERSION "3.4" CACHE STRING
     "Minimum acceptable version of a system-installed Eigen")
@@ -50,7 +61,13 @@ endif()
 
 if(Eigen3_FOUND)
   message(STATUS "Using system Eigen ${Eigen3_VERSION}")
+  set(CRAM_EIGEN_FETCHED FALSE)
 else()
+  # Recorded because it decides whether cram can be installed at all: a fetched
+  # Eigen is a build-tree target, not an installed package, so an exported cram
+  # naming it is rejected by install(EXPORT). See the install policy block
+  # below, which reads this to pick CRAM_ENABLE_INSTALL's default.
+  set(CRAM_EIGEN_FETCHED TRUE)
   message(STATUS "Fetching Eigen ${CRAM_EIGEN_GIT_TAG} from "
                  "${CRAM_EIGEN_GIT_REPOSITORY}")
   include(FetchContent)
@@ -98,6 +115,33 @@ else()
     unset(BUILD_TESTING CACHE)
   endif()
 endif()
+
+# --- install policy ---------------------------------------------------------
+# Two independent conditions have to hold before install rules make sense.
+#
+# Top-level: when cram is pulled into a larger project via add_subdirectory or
+# FetchContent, its install rules would inject cram's headers and package config
+# into that project's install tree, which is almost never wanted.
+#
+# No fetched dependencies: a fetched dependency is a target in *this* build tree
+# and is never installed, so exporting cram -- whose PUBLIC interface names
+# Eigen3::Eigen (really the `eigen` target) and optionally njoy::ENDFtk -- is not
+# merely non-relocatable but a hard install(EXPORT) error:
+#
+#   install(EXPORT "cramTargets" ...) includes target "cram" which requires
+#   target "eigen" that is not in any export set.
+#
+# Defaulting off in that case keeps `cmake -S . -B build` working for the common
+# developer setup with no system Eigen, instead of failing the configure over an
+# install nobody asked for. Forcing it on anyway is diagnosed in the install
+# section rather than left to surface as the error above.
+if(PROJECT_IS_TOP_LEVEL AND NOT CRAM_EIGEN_FETCHED AND NOT CRAM_WITH_ENDFTK)
+  set(_cram_install_default ON)
+else()
+  set(_cram_install_default OFF)
+endif()
+option(CRAM_ENABLE_INSTALL "Generate install and export rules"
+       ${_cram_install_default})
 
 # --- shared instrumentation flags (coverage / sanitizers) ------------------
 add_library(cram_quality_flags INTERFACE)
@@ -147,9 +191,23 @@ add_library(cram
   cram/cram_solver.cpp
   cram/burnup_matrix.cpp
   cram/endf_reader.cpp)
-target_include_directories(cram PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+# Headers are included as "cram/<name>.hpp", so the include root is the
+# directory *containing* cram/ -- the source root in the build tree, and the
+# install includedir once installed. A bare ${CMAKE_CURRENT_SOURCE_DIR} here
+# is not merely wrong for consumers but fatal: install(EXPORT) rejects an
+# absolute path into the source tree outright.
+target_include_directories(cram PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(cram PUBLIC Eigen3::Eigen cram_quality_flags)
-target_link_libraries(cram PRIVATE cram_warning_flags)
+# BUILD_INTERFACE because our warning policy is a build-time concern that has no
+# business in the installed package. PRIVATE alone is not enough to keep it out:
+# cram is a static library, so CMake records its PRIVATE dependencies in
+# INTERFACE_LINK_LIBRARIES as $<LINK_ONLY:cram_warning_flags>, and install(EXPORT)
+# then rejects the export because that target is not in the set. Adding it to the
+# set would satisfy CMake but ship consumers a cram::cram_warning_flags carrying
+# nothing usable -- LINK_ONLY drops the compile options that are its whole point.
+target_link_libraries(cram PRIVATE $<BUILD_INTERFACE:cram_warning_flags>)
 target_compile_features(cram PUBLIC cxx_std_20)
 
 if(CRAM_ENABLE_CLANG_TIDY)
@@ -262,6 +320,84 @@ if(CRAM_ENABLE_COVERAGE)
     COMMAND_EXPAND_LISTS
     DEPENDS coverage-reset
     VERBATIM)
+endif()
+
+# --- install / export -------------------------------------------------------
+if(CRAM_ENABLE_INSTALL)
+  include(CMakePackageConfigHelpers)
+
+  # Reached only when the user set CRAM_ENABLE_INSTALL=ON explicitly, since the
+  # default above is already off in both cases. Diagnosed here with the remedy
+  # rather than left to install(EXPORT)'s "target ... not in any export set",
+  # which names the dependency's internal target and not the cause.
+  if(CRAM_EIGEN_FETCHED)
+    message(FATAL_ERROR
+      "CRAM_ENABLE_INSTALL is ON but Eigen was fetched rather than found. A "
+      "fetched Eigen is a target in this build tree and is never installed, so "
+      "exporting cram against it cannot produce a usable package. Install a "
+      "system Eigen >= ${CRAM_EIGEN_MIN_VERSION} and reconfigure, or build with "
+      "-DCRAM_ENABLE_INSTALL=OFF.")
+  endif()
+  if(CRAM_WITH_ENDFTK)
+    message(FATAL_ERROR
+      "CRAM_ENABLE_INSTALL and CRAM_WITH_ENDFTK are both ON. ENDFtk is always "
+      "fetched and never installed, so njoy::ENDFtk cannot appear in an "
+      "exported cram. Installing an ENDFtk-enabled cram requires ENDFtk to be "
+      "packaged and found via find_package first.")
+  endif()
+
+  # cram_quality_flags is a PUBLIC dependency of cram, so it is part of cram's
+  # exported interface and has to travel with it -- an export set that names a
+  # target it does not contain is a configure-time error. It carries nothing at
+  # all unless CRAM_ENABLE_COVERAGE or CRAM_ENABLE_SANITIZERS is on, and in
+  # those builds consumers genuinely do need the flags: linking a --coverage
+  # static library without --coverage leaves the gcov symbols undefined.
+  install(TARGETS cram cram_quality_flags
+    EXPORT cramTargets
+    ARCHIVE  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME  DESTINATION ${CMAKE_INSTALL_BINDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+  # The driver is installed but deliberately kept out of the export set: it is
+  # an application, and exporting it would put a cram::deplete target into every
+  # consumer's namespace for no reason.
+  install(TARGETS deplete RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+  # Listed rather than globbed so that adding a header is a deliberate decision
+  # about whether it is public. cram_poles_internal.hpp is intentionally absent:
+  # it is included only by cram/*.cpp, never by an installed header.
+  install(FILES
+    cram/cram.hpp
+    cram/cram_solver.hpp
+    cram/chain.hpp
+    cram/nuclide.hpp
+    cram/endf_reader.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cram)
+
+  install(EXPORT cramTargets
+    FILE cramTargets.cmake
+    NAMESPACE cram::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/cram)
+
+  configure_package_config_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/cramConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/cramConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/cram)
+
+  # SameMinorVersion, not the more usual SameMajorVersion: before 1.0 the major
+  # is pinned at 0 and it is the minor that moves on a breaking change, so
+  # SameMajorVersion would declare every 0.x mutually compatible. This should
+  # become SameMajorVersion at 1.0.
+  write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/cramConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMinorVersion)
+
+  install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/cramConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/cramConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/cram)
 endif()
 
 # --- cppcheck static analysis target ---------------------------------------

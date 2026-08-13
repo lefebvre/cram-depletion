@@ -1,0 +1,31 @@
+@PACKAGE_INIT@
+
+# Package config for the installed cram library. Generated from this template by
+# configure_package_config_file(); see the install section of the top-level
+# CMakeLists.txt.
+#
+# The exported cram target carries its dependencies in its INTERFACE, so those
+# packages must be re-found here before cramTargets.cmake is included -- an
+# imported target's INTERFACE_LINK_LIBRARIES naming Eigen3::Eigen is only usable
+# once something has actually defined Eigen3::Eigen in the consumer's project.
+
+include(CMakeFindDependencyMacro)
+
+# NO_MODULE mirrors the top-level find_package(Eigen3 QUIET NO_MODULE): Eigen
+# ships a config package, and CMake's bundled FindEigen3 module (where one
+# exists at all) sets different variables. The version request is deliberately
+# omitted for the reason documented in the top-level CMakeLists.txt -- Eigen's
+# package version file uses SameMajorVersion compatibility, so asking for 3.4
+# rejects a system Eigen 5.x outright.
+find_dependency(Eigen3 NO_MODULE)
+
+# Recorded from CRAM_WITH_ENDFTK at configure time. A cram built without the
+# ENDFtk reader has no ENDFtk in its interface and must not require consumers
+# to have it.
+if(@CRAM_WITH_ENDFTK@)
+  find_dependency(ENDFtk)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/cramTargets.cmake")
+
+check_required_components(cram)

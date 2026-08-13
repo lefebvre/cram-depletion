@@ -49,8 +49,9 @@ ctest --test-dir build -R EndfReaderIntegration   # parses real ENDF data
 
 All project build options are `CRAM_`-prefixed (`CRAM_WITH_ENDFTK`,
 `CRAM_ENABLE_TESTS`, `CRAM_ENABLE_COVERAGE`, `CRAM_ENABLE_SANITIZERS`,
-`CRAM_ENABLE_BENCHMARKS`, `CRAM_ENABLE_CLANG_TIDY`) so they don't collide
-with the options of dependencies fetched via FetchContent.
+`CRAM_ENABLE_TSAN`, `CRAM_ENABLE_BENCHMARKS`, `CRAM_ENABLE_CLANG_TIDY`,
+`CRAM_WERROR`, `CRAM_ENABLE_INSTALL`) so they don't collide with the options of
+dependencies fetched via FetchContent.
 
 Which Eigen gets used is controlled by three cache variables:
 
@@ -74,6 +75,42 @@ To exercise the fetch path when a system Eigen is present, use CMake's stock
 escapes — `-DCMAKE_DISABLE_FIND_PACKAGE_Eigen3=ON` or
 `-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER`. No project-specific option is
 needed for that.
+
+## Installing and consuming
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/cram
+cmake --build build
+cmake --install build
+```
+
+That installs the `cram` static library, the public headers under
+`include/cram/`, the `deplete` driver, and a package config, after which a
+downstream project needs only:
+
+```cmake
+find_package(cram 0.1 REQUIRED)
+target_link_libraries(my_target PRIVATE cram::cram)
+```
+
+`#include <cram/cram.hpp>` then resolves from the install tree.
+`cram_poles_internal.hpp` is not installed: it is an implementation detail
+included only by `cram/*.cpp`.
+
+**Installing requires a system Eigen.** `CRAM_ENABLE_INSTALL` defaults to `ON`
+only for a top-level build that found Eigen via `find_package`. A *fetched*
+Eigen is a target in the build tree that is never itself installed, so an
+exported `cram` naming it cannot produce a working package — CMake rejects it
+outright with `install(EXPORT "cramTargets" ...) includes target "cram" which
+requires target "eigen" that is not in any export set`. Rather than fail the
+configure for the many developers who build without a system Eigen and never
+install, the option simply defaults off there; setting it `ON` anyway reports
+the reason and the remedy. The same applies to `CRAM_WITH_ENDFTK`, since ENDFtk
+is always fetched, so the two options are mutually exclusive for now.
+
+`CRAM_ENABLE_INSTALL` also defaults off whenever cram is consumed via
+`add_subdirectory` or `FetchContent`, so cram's headers and package config
+don't leak into the parent project's install tree.
 
 ## Tests, coverage, and quality checks
 
