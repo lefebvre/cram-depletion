@@ -89,13 +89,36 @@ That installs the `cram` static library, the public headers under
 downstream project needs only:
 
 ```cmake
-find_package(cram 0.1 REQUIRED)
+find_package(cram 1.0 REQUIRED)
 target_link_libraries(my_target PRIVATE cram::cram)
 ```
 
 `#include <cram/cram.hpp>` then resolves from the install tree.
 `cram_poles_internal.hpp` is not installed: it is an implementation detail
 included only by `cram/*.cpp`.
+
+### Versioning
+
+The version lives in exactly one place — the `project()` call in the top-level
+`CMakeLists.txt`. Everything else derives from it:
+
+| Consumer | How it gets the version |
+| --- | --- |
+| `cram/version.hpp` | Generated into the build tree from `cram/version.hpp.in`; provides `CRAM_VERSION_{MAJOR,MINOR,PATCH,STRING,HEX}` and `cram::kVersion` |
+| `find_package(cram 1.0)` | `cramConfigVersion.cmake`, generated with `SameMajorVersion` compatibility |
+| `deplete --version` | Prints `cram::kVersion` |
+| release tag | The `version-tag-check` CI job fails a `v*` tag that disagrees with `project()` |
+
+So cutting a release is: bump `project(cram_depletion VERSION ...)`, commit,
+then tag to match. Tagging without the bump fails CI rather than shipping a
+binary whose `--version` contradicts its tag.
+
+```cpp
+#include <cram/version.hpp>
+#if CRAM_VERSION_HEX < 0x010000
+#error "needs cram >= 1.0.0"
+#endif
+```
 
 **Installing requires a system Eigen.** `CRAM_ENABLE_INSTALL` defaults to `ON`
 only for a top-level build that found Eigen via `find_package`. A *fetched*

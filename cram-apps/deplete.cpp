@@ -2,14 +2,17 @@
 //
 //   ./deplete                      -> runs a self-contained decay demo (no data files)
 //   ./deplete <decay.endf> [t_sec] -> loads ENDF decay data (needs -DWITH_ENDFTK)
+//   ./deplete --version            -> prints the library version and exits
 //
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 #include "cram/chain.hpp"
 #include "cram/cram.hpp"
 #include "cram/endf_reader.hpp"
+#include "cram/version.hpp"
 
 using namespace cram;
 
@@ -57,6 +60,14 @@ static void demo() {
 }
 
 int main(int argc, char** argv) {
+  // Checked before the filename path so `--version` is never mistaken for an
+  // ENDF tape. cram::kVersion comes from the generated cram/version.hpp, so
+  // this reports the project() version and cannot drift from it.
+  if (argc > 1 && (std::strcmp(argv[1], "--version") == 0 || std::strcmp(argv[1], "-v") == 0)) {
+    std::printf("deplete (cram) %s\n", cram::kVersion);
+    return 0;
+  }
+
   if (argc < 2) {
     demo();
     return 0;
