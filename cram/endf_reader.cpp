@@ -83,18 +83,18 @@ int loadDecayData(DepletionChain& chain, const std::string& path) {
         d.gammaEnergyPerDecay = static_cast<double>(*ade.electromagneticDecayEnergy().begin());
       }
       for (const auto& mode : section.decayModes().decayModes()) {
-        DecayMode m;
-        m.rtyp = mode.decayChain();                                  // RTYP
-        m.finalState = static_cast<int>(mode.finalIsomericState());  // RFS
+        const double rtyp = mode.decayChain();                               // RTYP
+        const int finalState = static_cast<int>(mode.finalIsomericState());  // RFS
 
         // branchingRatio() is a {value, uncertainty} range.
         auto br = mode.branchingRatio();
-        m.branching = static_cast<double>(*br.begin());
 
         bool fission = false;
-        Zai daughter = applyDecay(parent, m.rtyp, m.finalState, fission);
-        m.isFission = fission;
-        d.modes.push_back(m);
+        const Zai daughter = applyDecay(parent, rtyp, finalState, fission);
+        d.modes.push_back(DecayMode{.rtyp = rtyp,
+                                    .branching = static_cast<double>(*br.begin()),
+                                    .finalState = finalState,
+                                    .isFission = fission});
 
         if (!fission)
           chain.add(daughter);  // register so production isn't dropped
