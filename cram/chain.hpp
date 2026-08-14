@@ -22,11 +22,19 @@ namespace cram {
 constexpr double kLn2 = std::numbers::ln2;
 
 // One decay branch of a parent nuclide.
+//
+// Deliberately without default member initializers: every member is a required
+// input and zero is not an "empty" branch but a plausible-looking inert one
+// (rtyp 0 decodes to a gamma, i.e. no Z/A change, and branching 0 contributes
+// no rate). Leaving them out makes -Wmissing-field-initializers demand all four
+// at each braced initialization, so a forgotten field is a build failure rather
+// than a nuclide that silently never transmutes. Construct with braces only;
+// never declare a bare `DecayMode m;`.
 struct DecayMode {
-  double rtyp = 0.0;       // ENDF decay-mode code (see nuclide.hpp)
-  double branching = 0.0;  // branching ratio for this mode (sum over modes ~ 1)
-  int finalState = 0;      // RFS: isomeric state of the daughter
-  bool isFission = false;  // spontaneous fission -> products from SFY table
+  double rtyp;       // ENDF decay-mode code (see nuclide.hpp)
+  double branching;  // branching ratio for this mode (sum over modes ~ 1)
+  int finalState;    // RFS: isomeric state of the daughter
+  bool isFission;    // spontaneous fission -> products from SFY table
 };
 
 // Per-nuclide decay information.
