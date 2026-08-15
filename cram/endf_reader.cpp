@@ -71,8 +71,7 @@ int loadDecayData(DepletionChain& chain, const std::string& path) {
     const int parentState = static_cast<int>(section.LISO());
     const Zai parent = zaiFromZA(za, parentState);
 
-    DecayData d;
-    d.halfLife = section.halfLife()[0];  // {value, uncertainty}
+    DecayData d{.halfLife = section.halfLife()[0]};  // {value, uncertainty}
 
     if (!section.isStable()) {
       // Average electromagnetic (gamma + X-ray) energy per decay [eV] from the
@@ -120,8 +119,7 @@ int loadFissionYields(DepletionChain& chain, const std::string& path, bool useCu
     auto parseAndLoad = [&](const auto& section) {
       const Zai par = zaiFromZA(section.ZA(), 0);
       for (const auto& block : section.yields()) {
-        FissionYields fy;
-        fy.energy = block.incidentEnergy();
+        FissionYields fy{.energy = block.incidentEnergy()};
 
         auto zafp = toVector(block.fissionProductIdentifiers());
         auto fps = toVector(block.isomericStates());

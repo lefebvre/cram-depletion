@@ -38,21 +38,40 @@ struct DecayMode {
 };
 
 // Per-nuclide decay information.
+//
+// halfLife has no default member initializer, for the reason DecayMode's members
+// have none: a half-life of 0 reads as "stable" everywhere downstream, so an
+// omitted one produces a nuclide that is silently frozen in place rather than an
+// obviously invalid one. -Wmissing-field-initializers therefore requires it at
+// every braced initialization.
+//
+// The remaining members keep theirs because zero is the correct value, not a
+// placeholder — and a member with an initializer is exempt from that warning, so
+// each one below is a deliberate statement that it need not be supplied:
+//   * decayConstant is derived, not input: setDecay() recomputes it from
+//     halfLife and overwrites whatever the caller passed.
+//   * gammaEnergyPerDecay is optional; MT457 omits it for many nuclides, and
+//     0 eV of emitted EM energy is what "not reported" means here.
+//   * modes is empty for a stable nuclide, and is otherwise appended to after
+//     construction, so it cannot be required at the brace.
 struct DecayData {
-  double halfLife = 0.0;             // seconds; 0 or inf => stable
-  double decayConstant = 0.0;        // ln(2)/halfLife; 0 if stable
-  double gammaEnergyPerDecay = 0.0;  // average EM (gamma+X-ray) energy per decay [eV]
-  // The explicit initializer is what keeps designated-initializer construction
-  // (DecayData{.halfLife = ...}) free of -Wmissing-field-initializers: every
-  // other member has one, so GCC would flag this member alone.
+  double halfLife;                    // seconds; 0 or inf => stable
+  double decayConstant = 0.0;         // ln(2)/halfLife; 0 if stable. Set by setDecay()
+  double gammaEnergyPerDecay = 0.0;   // average EM (gamma+X-ray) energy per decay [eV]
   std::vector<DecayMode> modes = {};  // empty if stable
 };
 
 // Independent fission yields for one parent at one incident energy.
 // (Use ENDF MT454 = independent yields, NOT MT459 = cumulative yields, when
 //  you model the full decay chain explicitly, otherwise you double count.)
+//
+// `energy` has no default member initializer: 0 already means something —
+// spontaneous fission — so an omitted incident energy does not fail, it
+// reclassifies a neutron-induced yield table as an SF one and sends
+// nearestYields() to the wrong table for every lookup. `products` keeps its
+// initializer because the product list is filled in after construction.
 struct FissionYields {
-  double energy = 0.0;  // incident neutron energy [eV]; 0 => spontaneous
+  double energy;                                      // incident neutron energy [eV]
   std::vector<std::pair<Zai, double>> products = {};  // (product, yield per fission)
 };
 

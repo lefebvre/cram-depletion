@@ -45,13 +45,16 @@ void DepletionChain::setDecay(const Zai& z, DecayData d) {
 
 void DepletionChain::addFissionYields(const Zai& parent, FissionYields y) {
   add(parent);
-  YieldEntry entry;
-  entry.resolved.reserve(y.products.size());
+  std::vector<std::pair<int, double>> resolved;
+  resolved.reserve(y.products.size());
   // add() registers the product and returns its index in one step, so the
   // matrix index is known here and never has to be looked up during assembly.
   for (const auto& [p, yield] : y.products)
-    entry.resolved.emplace_back(add(p), yield);
-  entry.yields = std::move(y);
+    resolved.emplace_back(add(p), yield);
+  // Built in one brace rather than default-constructed and filled: YieldEntry
+  // holds a FissionYields, whose `energy` has no default initializer, so a bare
+  // `YieldEntry entry;` would leave it indeterminate until the assignment.
+  YieldEntry entry{.yields = std::move(y), .resolved = std::move(resolved)};
   nfy_[parent.key()].push_back(std::move(entry));
 }
 
@@ -81,10 +84,9 @@ int DepletionChain::close() {
 
   int added = 0;
   for (std::int64_t key : parents) {
-    Zai parent;
-    parent.z = static_cast<int>(key / 10000);
-    parent.a = static_cast<int>((key / 10) % 1000);
-    parent.i = static_cast<int>(key % 10);
+    const Zai parent{.z = static_cast<int>(key / 10000),
+                     .a = static_cast<int>((key / 10) % 1000),
+                     .i = static_cast<int>(key % 10)};
     for (const DecayMode& m : decay_.at(key).modes) {
       if (m.isFission)
         continue;  // fission products come from the SFY/NFY tables, not one daughter

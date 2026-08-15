@@ -145,9 +145,7 @@ TEST(Chain, DecayLookupAbsentReturnsNull) {
 // ---------------------------------------------------------------------------
 TEST(Chain, FissionYieldsRegisterParentAndProducts) {
   DepletionChain c;
-  FissionYields y;
-  y.energy = 0.0253;
-  y.products = {{{54, 135, 0}, 0.064}, {{42, 99, 0}, 0.061}};
+  FissionYields y{.energy = 0.0253, .products = {{{54, 135, 0}, 0.064}, {{42, 99, 0}, 0.061}}};
   c.addFissionYields({92, 235, 0}, y);
   EXPECT_GE(c.indexOf({92, 235, 0}), 0);
   EXPECT_GE(c.indexOf({54, 135, 0}), 0);
@@ -156,12 +154,8 @@ TEST(Chain, FissionYieldsRegisterParentAndProducts) {
 
 TEST(Chain, NearestYieldsByEnergy) {
   DepletionChain c;
-  FissionYields thermal;
-  thermal.energy = 0.0253;
-  thermal.products = {{{54, 135, 0}, 0.06}};
-  FissionYields fast;
-  fast.energy = 5.0e5;
-  fast.products = {{{54, 135, 0}, 0.05}};
+  FissionYields thermal{.energy = 0.0253, .products = {{{54, 135, 0}, 0.06}}};
+  FissionYields fast{.energy = 5.0e5, .products = {{{54, 135, 0}, 0.05}}};
   c.addFissionYields({92, 235, 0}, thermal);
   c.addFissionYields({92, 235, 0}, fast);
 
@@ -253,9 +247,7 @@ TEST(DecayMatrix, SpontaneousFissionFeedsYields) {
   DepletionChain c;
   const Zai Cf{98, 252, 0}, P1{54, 140, 0}, P2{44, 108, 0};
   c.add(Cf);
-  FissionYields sfy;
-  sfy.energy = 0.0;
-  sfy.products = {{P1, 1.2}, {P2, 0.8}};
+  FissionYields sfy{.energy = 0.0, .products = {{P1, 1.2}, {P2, 0.8}}};
   c.addFissionYields(Cf, sfy);
   // single SF branch, branching 1.0
   c.setDecay(Cf, DecayData{.halfLife = 8.3e8, .modes = {DecayMode{6.0, 1.0, 0, true}}});
@@ -287,9 +279,7 @@ TEST(Reactions, FissionSourceWeightsByYield) {
   DepletionChain c;
   const Zai U{92, 235, 0}, P1{54, 135, 0}, P2{42, 99, 0};
   c.add(U);
-  FissionYields y;
-  y.energy = 0.0253;
-  y.products = {{P1, 0.064}, {P2, 0.061}};
+  FissionYields y{.energy = 0.0253, .products = {{P1, 0.064}, {P2, 0.061}}};
   c.addFissionYields(U, y);
 
   std::vector<Eigen::Triplet<double>> t;

@@ -175,6 +175,20 @@ endif()
 # compiled with -Wall: a warning in test code could not be caught by any CI job.
 # Keep the linkage PRIVATE so consumers of `cram` do not inherit our warning
 # policy.
+#
+# These are load-bearing, not tidiness. Members of the data structs whose zero
+# value would be a plausible-looking wrong answer rather than an obviously
+# invalid one carry no default initializer (see Zai, DecayMode, DecayData and
+# FissionYields), so it is -Wmissing-field-initializers -- part of -Wextra --
+# that requires them at each braced initialization. Dropping -Wextra does not
+# merely quiet a diagnostic here; it removes the check those structs are
+# written against.
+#
+# The other half of that guard, -Wuninitialized on a bare `DecayData d;`, is a
+# middle-end diagnostic and is silent at -O0: verified with g++ 13.3, which
+# rejects a read of an uninitialized member at -O2 and says nothing about the
+# same code at -O0. The braced-initialization check above is the one that holds
+# at every optimization level; the Release CI jobs are what carry the other.
 add_library(cram_warning_flags INTERFACE)
 if(MSVC)
   target_compile_options(cram_warning_flags INTERFACE /W4)
