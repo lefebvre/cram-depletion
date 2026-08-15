@@ -237,11 +237,27 @@ endif()
 
 if(CRAM_WITH_ENDFTK)
   include(FetchContent)
-  # Force spdlog (pulled in transitively by njoy/tools) to use std::format
-  # instead of its bundled fmt v10, which trips constexpr format-string
-  # checks of recent compilers. Set as cache before MakeAvailable so spdlog
-  # itself is built with it — propagates to consumers via spdlog::spdlog.
-  set(SPDLOG_USE_STD_FORMAT ON CACHE BOOL "" FORCE)
+  # njoy/tools' Log API takes fmt::format_string, so spdlog (pulled in
+  # transitively) must supply fmt, not std::format. Forced OFF because an
+  # earlier revision forced it ON — a value that survives in existing build
+  # caches — and on a standard library with complete <format> (MSVC today,
+  # libstdc++ once __cpp_lib_format reaches 202207) std::format_string's
+  # consteval constructor rejects tools' logging calls outright. See #16.
+  set(SPDLOG_USE_STD_FORMAT OFF CACHE BOOL "" FORCE)
+  # ENDFtk v1.2.0 pins njoy/tools v0.4.3, whose Log::info(Args... args)
+  # swallows the format string into a by-value pack and forwards it as a
+  # runtime parameter — ill-formed against the consteval format-string
+  # constructors of both std::format_string and fmt::format_string (C7595
+  # on MSVC; GCC only accepts it while libstdc++'s <format> is incomplete).
+  # tools v0.4.4 takes the format string as an explicit first parameter, so
+  # call-site literals satisfy the consteval check. Declared here, before
+  # ENDFtk, so it wins over ENDFtk's pin: FetchContent honors the first
+  # declaration of a given name.
+  FetchContent_Declare(tools
+    GIT_REPOSITORY https://github.com/njoy/tools.git
+    GIT_TAG        v0.4.4
+    GIT_SHALLOW    TRUE
+    SYSTEM)
   # SYSTEM, as for Eigen, googletest and benchmark. endf_reader.cpp includes
   # <ENDFtk.hpp>, so without it every diagnostic raised inside ENDFtk's headers
   # (and its njoy/tools dependency) is attributed to our translation unit: with
@@ -255,6 +271,15 @@ if(CRAM_WITH_ENDFTK)
   FetchContent_MakeAvailable(ENDFtk)
   target_compile_definitions(cram PUBLIC WITH_ENDFTK)
   target_link_libraries(cram PUBLIC njoy::ENDFtk)
+  if(MSVC)
+    # ENDFtk's parsing templates convert size_t to int inside MSVC's own STL
+    # headers (C4267, raised in <xutility>). SYSTEM/external:W0 cannot reach
+    # those: the warning's location is the standard library, which is not an
+    # /external:I directory. Scoped to the one translation unit that includes
+    # <ENDFtk.hpp> so the rest of cram keeps the warning.
+    set_property(SOURCE cram/endf_reader.cpp APPEND PROPERTY
+      COMPILE_OPTIONS /wd4267)
+  endif()
 endif()
 
 # --- driver -----------------------------------------------------------------

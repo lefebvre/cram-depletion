@@ -292,3 +292,26 @@ jobs:
           cmake --build build -j
       - name: Run integration tests against real ENDF data
         run: ctest --test-dir build -R EndfReaderIntegration --output-on-failure
+
+  # Windows counterpart of endftk-integration. MSVC ships a complete <format>,
+  # so this is the configuration that exercises the consteval format-string
+  # path through spdlog and njoy/tools; the Linux job cannot reach it until
+  # libstdc++'s __cpp_lib_format passes 202207 (see #16).
+  endftk-integration-windows:
+    needs: format-check
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure with ENDFtk reader (MSVC)
+        run: >
+          cmake -B build -G "Visual Studio 17 2022" -DCMAKE_BUILD_TYPE=Release
+          -DCRAM_WITH_ENDFTK=ON -DCRAM_WERROR=ON
+
+      - name: Build
+        run: cmake --build build --config Release -j
+
+      - name: Run integration tests against real ENDF data
+        run: >
+          ctest --test-dir build --build-config Release
+          -R EndfReaderIntegration --output-on-failure
