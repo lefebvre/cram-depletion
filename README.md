@@ -89,7 +89,7 @@ That installs the `cram` static library, the public headers under
 downstream project needs only:
 
 ```cmake
-find_package(cram 1.0 REQUIRED)
+find_package(cram 2.0 REQUIRED)
 target_link_libraries(my_target PRIVATE cram::cram)
 ```
 
@@ -105,7 +105,7 @@ The version lives in exactly one place — the `project()` call in the top-level
 | Consumer | How it gets the version |
 | --- | --- |
 | `cram/version.hpp` | Generated into the build tree from `cram/version.hpp.in`; provides `CRAM_VERSION_{MAJOR,MINOR,PATCH,STRING,HEX}` and `cram::kVersion` |
-| `find_package(cram 1.0)` | `cramConfigVersion.cmake`, generated with `SameMajorVersion` compatibility |
+| `find_package(cram 2.0)` | `cramConfigVersion.cmake`, generated with `SameMajorVersion` compatibility |
 | `deplete --version` | Prints `cram::kVersion` |
 | release tag | The `version-tag-check` CI job fails a `v*` tag that disagrees with `project()` |
 
