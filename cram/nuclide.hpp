@@ -15,10 +15,21 @@ namespace cram {
 // A nuclide is identified by (Z, A, I) where I is the isomeric/metastable
 // level (0 = ground state, 1 = first metastable, ...). We pack it into a
 // single integer key for fast hashing:  ZAI = Z*10000 + A*10 + I.
+//
+// Z and A deliberately have no default member initializer. No nuclide has Z = 0
+// or A = 0, so zero is not an "unset" nuclide but a phantom one: it packs to key
+// 0, which add() registers and indexes like any other, and a forgotten field
+// therefore yields a chain entry that looks structurally fine and matches
+// nothing real. Leaving the initializers out makes -Wmissing-field-initializers
+// demand both at each braced initialization. `i` keeps its initializer because
+// the ground state is genuinely the right default for an unstated isomeric
+// level, which is what lets the common Zai{92, 235} stay short. Construct with
+// braces; a bare `Zai z;` leaves Z and A indeterminate and is caught only by
+// -Wuninitialized, which cannot see every path.
 struct Zai {
-  int z = 0;  // proton number
-  int a = 0;  // mass number
-  int i = 0;  // isomeric state (LISO/RFS)
+  int z;      // proton number
+  int a;      // mass number
+  int i = 0;  // isomeric state (LISO/RFS); 0 = ground state
 
   constexpr std::int64_t key() const {
     return (std::int64_t(z) * 10000) + (std::int64_t(a) * 10) + i;

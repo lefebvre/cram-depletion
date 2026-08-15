@@ -214,6 +214,16 @@ OpenMC (MIT license) and were checked against analytic Bateman solutions to
 - **Register daughters.** A production term is dropped if the daughter isn't in
   the chain. `loadDecayData` adds reachable daughters; if you build chains by
   hand, `chain.add(...)` every product first.
+- **Build the data structs with braces.** `Zai`, `DecayMode`, `DecayData` and
+  `FissionYields` leave the members whose zero value would be a plausible wrong
+  answer — `Zai::z`/`::a`, every `DecayMode` field, `DecayData::halfLife`,
+  `FissionYields::energy` — without a default initializer, so omitting one is a
+  `-Wmissing-field-initializers` diagnostic rather than a nuclide that silently
+  never decays or a yield table that silently becomes a spontaneous-fission one.
+  `DecayData d; d.halfLife = ...;` leaves the rest indeterminate: write
+  `DecayData d{.halfLife = ...}` instead. Members that do keep an initializer —
+  `Zai::i` (ground state), `DecayData::decayConstant` (derived by `setDecay`),
+  `gammaEnergyPerDecay`, and the two vectors — are optional by design.
 - **CRAM accuracy is absolute, not relative, for trace species.** Nuclides many
   orders of magnitude below the dominant one can come out slightly negative
   (~1e-17). That is expected; clamp at zero if you need non-negativity.

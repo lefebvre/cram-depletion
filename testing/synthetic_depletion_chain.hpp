@@ -61,17 +61,14 @@ inline SyntheticDepletionChain buildSyntheticDepletionChain(int n, int fissionPa
   }
 
   for (const Zai& parent : zais) {
-    DecayData d;
-    d.halfLife = std::pow(10.0, logHalfLife(rng));
+    DecayData d{.halfLife = std::pow(10.0, logHalfLife(rng))};
     const int modes = nModes(rng);
     double remaining = 1.0;
     for (int k = 0; k < modes; ++k) {
-      DecayMode m;
-      m.rtyp = kRtyp[rtypPick(rng)];
-      m.branching = (k == modes - 1) ? remaining : remaining / 2.0;
-      remaining -= m.branching;
-      m.finalState = 0;
-      m.isFission = false;
+      const double rtyp = kRtyp[rtypPick(rng)];
+      const double branching = (k == modes - 1) ? remaining : remaining / 2.0;
+      remaining -= branching;
+      const DecayMode m{.rtyp = rtyp, .branching = branching, .finalState = 0, .isFission = false};
       d.modes.push_back(m);
     }
     out.chain.setDecay(parent, std::move(d));
@@ -79,8 +76,7 @@ inline SyntheticDepletionChain buildSyntheticDepletionChain(int n, int fissionPa
 
   for (int f = 0; f < fissionParents && f < n; ++f) {
     const Zai parent = zais[static_cast<std::size_t>(f)];
-    FissionYields fy;
-    fy.energy = 0.0253;
+    FissionYields fy{.energy = 0.0253};
     fy.products.reserve(static_cast<std::size_t>(productsPerParent));
     for (int p = 0; p < productsPerParent; ++p) {
       const Zai prod = zais[static_cast<std::size_t>((f * 7 + p * 3) % n)];

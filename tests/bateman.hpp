@@ -47,11 +47,8 @@ struct TwoBranchResult {
 };
 inline TwoBranchResult batemanTwoBranch(double lambda_a, double b_ab, double b_ac, double t) {
   const double eA = std::exp(-lambda_a * t);
-  TwoBranchResult r;
-  r.a = eA;
-  r.b = b_ab * (1.0 - eA);  // dB/dt = b_ab*lambda_a*A, integrate with A=exp(-la t)
-  r.c = b_ac * (1.0 - eA);
-  return r;
+  // dB/dt = b_ab*lambda_a*A, integrated with A = exp(-lambda_a t); likewise C.
+  return TwoBranchResult{.a = eA, .b = b_ab * (1.0 - eA), .c = b_ac * (1.0 - eA)};
 }
 
 }  // namespace cram_test
