@@ -155,7 +155,7 @@ jobs:
           cat > CMakeLists.txt <<'EOF'
           cmake_minimum_required(VERSION 3.28)
           project(cram_consumer LANGUAGES CXX)
-          find_package(cram 1.0 REQUIRED)
+          find_package(cram 2.0 REQUIRED)
           add_executable(use_cram main.cpp)
           target_link_libraries(use_cram PRIVATE cram::cram)
           EOF
