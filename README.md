@@ -20,6 +20,9 @@ cram/chain.hpp           DepletionChain: nuclides, decay data, fission yields
 cram/cram.hpp            CRAM solver interface
 cram/cram.cpp            IPF-CRAM-16 / CRAM-48 (verified coefficients)
 cram/burnup_matrix.cpp   matrix assembly (decay, fission source, reactions)
+cram/reaction.hpp        neutron reaction channels, products, OpenMC reaction names
+cram/integrator.hpp      time integrators (predictor, CE/CM, CE/LI, LE/QI, CF4)
+cram/deplete.hpp         DepletionSystem: fixed one-group XS, constant flux or power
 cram/endf_reader.cpp     ENDFtk ingestion (optional, see notes)
 cram-apps/deplete.cpp    runnable demo + ENDF driver
 cmake/gcov_to_lcov.py    gcov JSON -> LCOV tracefile (consumed by VS Code)
@@ -188,7 +191,11 @@ tests/bateman.hpp        analytic Bateman references
 tests/test_nuclide.cpp   ZAI packing, RTYP decode, decay-mode -> daughter
 tests/test_chain.cpp     registration, decay/yield data, matrix assembly
 tests/test_cram.cpp      CRAM16/CRAM48 vs analytic; mass, stiffness, edge cases
+tests/test_reaction.cpp  reaction products and OpenMC reaction names
+tests/test_integrator.cpp order-of-accuracy study; exactness under constant flux
+tests/test_deplete.cpp   DepletionSystem: normalization, validation, trajectories
 tests/integration/       real ENDFtk reader vs real ENDF data (WITH_ENDFTK only)
+testing/depletion_pin_fixture.hpp  hand-built thermal-pin chain + one-group XS
 ```
 
 ## How CRAM works here
@@ -240,8 +247,8 @@ OpenMC (MIT license) and were checked against analytic Bateman solutions to
 
 ## Possible next steps
 
-- Predictor-corrector time integration (CE/CM, LE/QI) for coupling to a flux
-  solver, so the matrix is rebuilt as the spectrum/number densities change.
+- The stochastic-implicit (SI-CE/LI, SI-LE/QI) and EPC-RK4 integrators from
+  the OpenMC set, for Xe stability on very large systems.
 - One-group collapse of MF3 cross sections (or ACE data) to get reaction rates
   for `(n,γ)`, `(n,2n)`, fission, etc.
 - A sparsity-preserving ordering / reuse of the symbolic factorization across
