@@ -18,6 +18,7 @@ int DepletionChain::add(const Zai& z) {
   int idx = static_cast<int>(nuclides_.size());
   nuclides_.push_back(z);
   index_.emplace(z.key(), idx);
+  ++revision_;
   return idx;
 }
 
@@ -42,6 +43,7 @@ void DepletionChain::setDecay(const Zai& z, DecayData d) {
   if (inserted)
     decayOrder_.push_back(idx);  // see decayTriplets(): fixes assembly order
   it->second = std::move(d);
+  ++revision_;
 }
 
 void DepletionChain::addFissionYields(const Zai& parent, FissionYields y) {
@@ -57,6 +59,7 @@ void DepletionChain::addFissionYields(const Zai& parent, FissionYields y) {
   // `YieldEntry entry;` would leave it indeterminate until the assignment.
   YieldEntry entry{.yields = std::move(y), .resolved = std::move(resolved)};
   nfy_[parent.key()].push_back(std::move(entry));
+  ++revision_;
 }
 
 const DecayData* DepletionChain::decay(const Zai& z) const {

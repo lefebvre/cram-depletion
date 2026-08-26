@@ -18,6 +18,7 @@
 // them itself; that bookkeeping is deliberately not done here.
 //
 #include <Eigen/SparseCore>
+#include <cstdint>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -70,6 +71,15 @@ public:
   explicit DepletionSystem(const DepletionChain& chain);
   explicit DepletionSystem(DepletionChain&&) = delete;
 
+  // Re-cache the chain's decay matrix. Needed only after the chain itself
+  // changes while this system exists -- the workflow the constructor's own
+  // "call close() before building the matrix" warning invites, since close()
+  // adds the missing daughters and the cached half then describes a smaller
+  // chain than the reaction half assemble() builds. assemble() refuses to mix
+  // the two (see below), so a chain that changed is a call to this, not a
+  // wrong answer.
+  void refreshChain();
+
   // Set the one-group reaction cross sections for `parent` (replaces any prior
   // set). Parents and products are expected to already exist in the chain.
   // Throws std::invalid_argument for a negative sigma, and for a fission
@@ -81,10 +91,16 @@ public:
   // `power` is a power density in the same volume basis as the number densities
   // (e.g. W/cm^3 when n is atom/cm^3). Throws std::invalid_argument if any
   // fission channel already set has q <= 0: such a channel would contribute
-  // fissions but no power, so the normalization would be silently wrong.
+  // fissions but no power, so the normalization would be silently wrong. Also
+  // throws for a negative or non-finite target: a negative power runs every
+  // reaction backwards and grows the fissile inventory, and a NaN or infinity
+  // poisons the factorization of every matrix assembled from it, neither with
+  // any physical reading.
   void setConstantPower(double power);
 
   // Hold a fixed scalar flux [n/cm^2/s]; A is then composition-independent.
+  // Throws std::invalid_argument for a negative or non-finite flux, for the
+  // reason setConstantPower() does.
   void setConstantFlux(double flux);
 
   Normalization normalization() const { return norm_; }
@@ -102,7 +118,10 @@ public:
   double powerFor(const Eigen::VectorXd& n) const;
 
   // Assemble the burnup matrix A(n) [1/s] = (cached decay) + (reactions at the
-  // normalized flux).
+  // normalized flux). Throws std::logic_error if the chain has been modified
+  // since the decay half was cached (see refreshChain()); the two halves would
+  // otherwise describe different chains, which is an Eigen dimension assertion
+  // in a debug build and a silently truncated matrix in a release one.
   Eigen::SparseMatrix<double> assemble(const Eigen::VectorXd& n) const;
 
   // assemble() bound as a MatrixBuilder for the integrators. Captures `this`;
@@ -123,6 +142,7 @@ private:
 
   const DepletionChain& chain_;
   Eigen::SparseMatrix<double> decay_;  // cached, composition-independent
+  std::uint64_t chainRevision_ = 0;    // chain.revision() decay_ was built from
   std::vector<std::pair<Zai, std::vector<ReactionXS>>> reactions_;
   Normalization norm_ = Normalization::ConstantFlux;
   double power_ = 0.0;

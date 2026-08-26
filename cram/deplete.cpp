@@ -1,5 +1,6 @@
 #include "cram/deplete.hpp"
 
+#include <cmath>
 #include <stdexcept>
 #include <utility>
 
@@ -19,7 +20,12 @@ ReactionXS reactionXs(const ChainReaction& channel, double sigmaBarn) {
 }
 
 DepletionSystem::DepletionSystem(const DepletionChain& chain)
-    : chain_(chain), decay_(chain.decayMatrix()) {}
+    : chain_(chain), decay_(chain.decayMatrix()), chainRevision_(chain.revision()) {}
+
+void DepletionSystem::refreshChain() {
+  decay_ = chain_.decayMatrix();
+  chainRevision_ = chain_.revision();
+}
 
 void DepletionSystem::requireFissionQ(const std::vector<ReactionXS>& reactions) {
   for (const auto& r : reactions) {
@@ -46,6 +52,8 @@ void DepletionSystem::setReactions(const Zai& parent, std::vector<ReactionXS> re
 }
 
 void DepletionSystem::setConstantPower(double power) {
+  if (!std::isfinite(power) || power < 0.0)
+    throw std::invalid_argument("cram: constant power must be finite and non-negative");
   if (power != 0.0) {
     for (const auto& [parent, rxns] : reactions_)
       requireFissionQ(rxns);
@@ -55,6 +63,8 @@ void DepletionSystem::setConstantPower(double power) {
 }
 
 void DepletionSystem::setConstantFlux(double flux) {
+  if (!std::isfinite(flux) || flux < 0.0)
+    throw std::invalid_argument("cram: constant flux must be finite and non-negative");
   norm_ = Normalization::ConstantFlux;
   flux_ = flux;
 }
@@ -91,6 +101,18 @@ double DepletionSystem::powerFor(const Eigen::VectorXd& n) const {
 }
 
 Eigen::SparseMatrix<double> DepletionSystem::assemble(const Eigen::VectorXd& n) const {
+  // The decay half was cached against the chain as it stood at construction,
+  // while the reaction half below is sized from the chain as it stands now. A
+  // chain that grew in between -- close() registering the daughters the
+  // constructor warned about is the ordinary way it happens -- leaves the two
+  // describing different chains. Refuse rather than assert (debug build) or
+  // silently truncate the sum to the smaller one (release build).
+  if (chain_.revision() != chainRevision_)
+    throw std::logic_error(
+        "cram: the depletion chain changed after this DepletionSystem cached its decay "
+        "matrix; call DepletionSystem::refreshChain() (or rebuild the system) after "
+        "modifying the chain, e.g. after DepletionChain::close()");
+
   const double flux = fluxFor(n);
 
   std::vector<Eigen::Triplet<double>> t;
@@ -104,7 +126,19 @@ Eigen::SparseMatrix<double> DepletionSystem::assemble(const Eigen::VectorXd& n) 
         if (rate == 0.0)
           continue;
         if (r.type == ReactionType::Fission) {
-          chain_.addFissionSource(t, parent, rate, r.energy);
+          if (chain_.nearestYields(parent, r.energy) != nullptr) {
+            chain_.addFissionSource(t, parent, rate, r.energy);
+          } else {
+            // Fissionable with no yield table (a chain trimmed of its yields,
+            // or a nuclide whose yields were never supplied): the parent is
+            // still consumed, exactly as for an untracked product below. Left
+            // to addFissionSource() the whole channel would drop out -- no
+            // removal either -- while fissionPowerWeight() still credits its
+            // energy release, so constant-power normalization would silently
+            // under-burn the material to hold a power the matrix does not
+            // deliver.
+            t.emplace_back(pi, pi, -rate);
+          }
         } else if (r.target && chain_.indexOf(*r.target) >= 0) {
           chain_.addReaction(t, parent, *r.target, rate);
         } else {

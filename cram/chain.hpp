@@ -97,6 +97,15 @@ public:
   int size() const { return static_cast<int>(nuclides_.size()); }
   const std::vector<Zai>& nuclides() const { return nuclides_; }
 
+  // Bumped by every call that changes what a matrix built from this chain
+  // would contain: a nuclide actually registered, decay data set, a yield set
+  // added. A holder of a matrix assembled from this chain (DepletionSystem
+  // caches the decay half) records the value it built against and compares,
+  // so a chain that grows or is re-parameterized underneath it is caught
+  // rather than mixed with the stale half. Never decreases; only the
+  // comparison is meaningful, not the magnitude.
+  std::uint64_t revision() const { return revision_; }
+
   void setDecay(const Zai& z, DecayData d);
   void addFissionYields(const Zai& parent, FissionYields y);
 
@@ -163,6 +172,7 @@ private:
     std::vector<std::pair<int, double>> resolved;  // (matrix index, yield per fission)
   };
 
+  std::uint64_t revision_ = 0;
   std::vector<Zai> nuclides_;
   std::unordered_map<std::int64_t, int> index_;
   std::unordered_map<std::int64_t, DecayData> decay_;
