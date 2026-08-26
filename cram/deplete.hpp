@@ -52,6 +52,13 @@ struct ReactionXS {
   double energy = 0.0253;     // incident neutron energy [eV] for the yield lookup
 };
 
+// The cross-section entry for a topology channel with the given microscopic
+// cross section [barn] for the whole channel. The channel's branching scales
+// sigma, and its Q value becomes ReactionXS::q, which is how a fission channel
+// read from an OpenMC chain reaches constant-power normalization without the
+// caller copying fields by hand.
+ReactionXS reactionXs(const ChainReaction& channel, double sigmaBarn);
+
 class DepletionSystem {
 public:
   enum class Normalization { ConstantPower, ConstantFlux };

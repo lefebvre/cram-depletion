@@ -23,6 +23,7 @@ cram/burnup_matrix.cpp   matrix assembly (decay, fission source, reactions)
 cram/reaction.hpp        neutron reaction channels, products, OpenMC reaction names
 cram/integrator.hpp      time integrators (predictor, CE/CM, CE/LI, LE/QI, CF4)
 cram/deplete.hpp         DepletionSystem: fixed one-group XS, constant flux or power
+cram/chain_xml.cpp       OpenMC depletion_chain XML reader (optional, pugixml)
 cram/endf_reader.cpp     ENDFtk ingestion (optional, see notes)
 cram-apps/deplete.cpp    runnable demo + ENDF driver
 cmake/gcov_to_lcov.py    gcov JSON -> LCOV tracefile (consumed by VS Code)
@@ -48,10 +49,14 @@ cmake -B build -DCRAM_WITH_ENDFTK=ON
 cmake --build build
 ./build/deplete decay_sublibrary.endf 86400
 ctest --test-dir build -R EndfReaderIntegration   # parses real ENDF data
+
+# with the OpenMC depletion_chain XML reader (pugixml, found or fetched)
+cmake -B build -DCRAM_WITH_CHAIN_XML=ON
+cmake --build build
 ```
 
 All project build options are `CRAM_`-prefixed (`CRAM_WITH_ENDFTK`,
-`CRAM_ENABLE_TESTS`, `CRAM_ENABLE_COVERAGE`, `CRAM_ENABLE_SANITIZERS`,
+`CRAM_WITH_CHAIN_XML`, `CRAM_ENABLE_TESTS`, `CRAM_ENABLE_COVERAGE`, `CRAM_ENABLE_SANITIZERS`,
 `CRAM_ENABLE_TSAN`, `CRAM_ENABLE_BENCHMARKS`, `CRAM_ENABLE_CLANG_TIDY`,
 `CRAM_WERROR`, `CRAM_ENABLE_INSTALL`) so they don't collide with the options of
 dependencies fetched via FetchContent.
@@ -132,7 +137,10 @@ requires target "eigen" that is not in any export set`. Rather than fail the
 configure for the many developers who build without a system Eigen and never
 install, the option simply defaults off there; setting it `ON` anyway reports
 the reason and the remedy. The same applies to `CRAM_WITH_ENDFTK`, since ENDFtk
-is always fetched, so the two options are mutually exclusive for now.
+is always fetched, so the two options are mutually exclusive for now. It applies
+to `CRAM_WITH_CHAIN_XML` only when pugixml had to be fetched: a system pugixml
+(>= 1.12, e.g. `libpugixml-dev`) is re-found by the package config and an
+installed cram can carry the reader.
 
 `CRAM_ENABLE_INSTALL` also defaults off whenever cram is consumed via
 `add_subdirectory` or `FetchContent`, so cram's headers and package config
@@ -194,6 +202,7 @@ tests/test_cram.cpp      CRAM16/CRAM48 vs analytic; mass, stiffness, edge cases
 tests/test_reaction.cpp  reaction products and OpenMC reaction names
 tests/test_integrator.cpp order-of-accuracy study; exactness under constant flux
 tests/test_deplete.cpp   DepletionSystem: normalization, validation, trajectories
+tests/test_chain_xml.cpp OpenMC chain reader (CRAM_WITH_CHAIN_XML only)
 tests/integration/       real ENDFtk reader vs real ENDF data (WITH_ENDFTK only)
 testing/depletion_pin_fixture.hpp  hand-built thermal-pin chain + one-group XS
 ```

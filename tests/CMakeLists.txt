@@ -8,6 +8,12 @@ add_executable(unit_tests
   test_integrator.cpp
   test_deplete.cpp)
 
+# The reader's tests need the reader; the stub-throws test lives in
+# test_chain.cpp beside the ENDFtk one and always runs.
+if(CRAM_WITH_CHAIN_XML)
+  target_sources(unit_tests PRIVATE test_chain_xml.cpp)
+endif()
+
 target_include_directories(unit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
                                               ${CMAKE_SOURCE_DIR}/testing)
 target_link_libraries(unit_tests PRIVATE cram cram_quality_flags cram_warning_flags

@@ -28,6 +28,7 @@ set(FETCHCONTENT_BASE_DIR ${CMAKE_SOURCE_DIR}/external CACHE PATH
 # options of packages pulled in via FetchContent (Eigen, googletest, ENDFtk),
 # which share CMake's global option/cache namespace.
 option(CRAM_WITH_ENDFTK      "Build the ENDFtk-based data reader"        OFF)
+option(CRAM_WITH_CHAIN_XML   "Build the OpenMC depletion_chain XML reader (pugixml)" OFF)
 option(CRAM_ENABLE_TESTS     "Build the unit tests"                      ON)
 option(CRAM_ENABLE_BENCHMARKS "Build the Google Benchmark perf suite"    OFF)
 option(CRAM_ENABLE_COVERAGE  "Instrument for code coverage (gcov/gcovr)" OFF)
@@ -134,11 +135,43 @@ endif()
 #   install(EXPORT "cramTargets" ...) includes target "cram" which requires
 #   target "eigen" that is not in any export set.
 #
+# pugixml (behind CRAM_WITH_CHAIN_XML) is linked PRIVATE, but cram is a static
+# library, so CMake still records it in INTERFACE_LINK_LIBRARIES as
+# $<LINK_ONLY:pugixml::pugixml> and install(EXPORT) rejects a fetched one the
+# same way. A pugixml found via find_package is an imported target the consumer
+# can re-find, so only the fetched case blocks installation.
+#
 # Defaulting off in that case keeps `cmake -S . -B build` working for the common
 # developer setup with no system Eigen, instead of failing the configure over an
 # install nobody asked for. Forcing it on anyway is diagnosed in the install
 # section rather than left to surface as the error above.
-if(PROJECT_IS_TOP_LEVEL AND NOT CRAM_EIGEN_FETCHED AND NOT CRAM_WITH_ENDFTK)
+#
+# --- pugixml (optional) -----------------------------------------------------
+# Resolved here, before the install default is computed, for the reason Eigen
+# is: whether it was found or fetched decides whether cram can be installed.
+set(CRAM_PUGIXML_FETCHED FALSE)
+if(CRAM_WITH_CHAIN_XML)
+  find_package(pugixml 1.12 QUIET)
+  if(pugixml_FOUND)
+    message(STATUS "Using system pugixml ${pugixml_VERSION}")
+  else()
+    set(CRAM_PUGIXML_FETCHED TRUE)
+    message(STATUS "Fetching pugixml v1.14")
+    include(FetchContent)
+    # SYSTEM, as for Eigen: chain_xml.cpp includes <pugixml.hpp>, and warnings
+    # raised in headers we do not own must not fail a -Werror build.
+    FetchContent_Declare(pugixml
+      GIT_REPOSITORY https://github.com/zeux/pugixml.git
+      GIT_TAG        v1.14
+      GIT_SHALLOW    TRUE
+      EXCLUDE_FROM_ALL
+      SYSTEM)
+    FetchContent_MakeAvailable(pugixml)
+  endif()
+endif()
+
+if(PROJECT_IS_TOP_LEVEL AND NOT CRAM_EIGEN_FETCHED AND NOT CRAM_WITH_ENDFTK
+   AND NOT CRAM_PUGIXML_FETCHED)
   set(_cram_install_default ON)
 else()
   set(_cram_install_default OFF)
@@ -221,6 +254,7 @@ add_library(cram
   cram/reaction.cpp
   cram/integrator.cpp
   cram/deplete.cpp
+  cram/chain_xml.cpp
   cram/endf_reader.cpp)
 # Headers are included as "cram/<name>.hpp", so the include root is the
 # directory *containing* cram/ -- the source root in the build tree, and the
@@ -297,6 +331,14 @@ if(CRAM_WITH_ENDFTK)
     set_property(SOURCE cram/endf_reader.cpp APPEND PROPERTY
       COMPILE_OPTIONS /wd4267)
   endif()
+endif()
+
+if(CRAM_WITH_CHAIN_XML)
+  # PUBLIC so the compile definition reaches consumers and tests: chain_xml.hpp
+  # is always installed and compiles without pugixml, and the definition is
+  # what tells a consumer (and the stub loaders) whether the reader is in.
+  target_compile_definitions(cram PUBLIC CRAM_WITH_CHAIN_XML)
+  target_link_libraries(cram PRIVATE pugixml::pugixml)
 endif()
 
 # --- driver -----------------------------------------------------------------
@@ -405,6 +447,14 @@ if(CRAM_ENABLE_INSTALL)
       "exported cram. Installing an ENDFtk-enabled cram requires ENDFtk to be "
       "packaged and found via find_package first.")
   endif()
+  if(CRAM_PUGIXML_FETCHED)
+    message(FATAL_ERROR
+      "CRAM_ENABLE_INSTALL is ON but pugixml (for CRAM_WITH_CHAIN_XML) was "
+      "fetched rather than found. A fetched pugixml is a target in this build "
+      "tree and is never installed, so the exported cram cannot link against "
+      "it. Install a system pugixml >= 1.12 and reconfigure, or build with "
+      "-DCRAM_WITH_CHAIN_XML=OFF or -DCRAM_ENABLE_INSTALL=OFF.")
+  endif()
 
   # cram_quality_flags is a PUBLIC dependency of cram, so it is part of cram's
   # exported interface and has to travel with it -- an export set that names a
@@ -435,6 +485,7 @@ if(CRAM_ENABLE_INSTALL)
     cram/reaction.hpp
     cram/integrator.hpp
     cram/deplete.hpp
+    cram/chain_xml.hpp
     cram/endf_reader.hpp
     ${CRAM_GENERATED_INCLUDE_DIR}/cram/version.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cram)
