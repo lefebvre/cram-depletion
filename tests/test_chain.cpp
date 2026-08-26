@@ -5,9 +5,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
 #include <vector>
 
 #include "cram/chain.hpp"
+#include "cram/chain_xml.hpp"
 #include "cram/endf_reader.hpp"
 
 using namespace cram;
@@ -529,3 +531,14 @@ TEST(DecayMatrix, ExplicitDaughterIgnoredForFissionMode) {
   auto M = c.decayMatrix();
   EXPECT_EQ(M.nonZeros(), 1);  // removal only; no SFY table supplied
 }
+
+// When built without -DCRAM_WITH_CHAIN_XML, the chain readers throw rather than
+// leaving the chain silently empty.
+#ifndef CRAM_WITH_CHAIN_XML
+TEST(ChainXml, StubsThrowWithoutReader) {
+  DepletionChain c;
+  EXPECT_THROW(loadDepletionChainXml(c, "ignored.xml"), std::runtime_error);
+  EXPECT_THROW(loadDepletionChainXmlString(c, "<depletion_chain/>"), std::runtime_error);
+  EXPECT_EQ(c.size(), 0);
+}
+#endif

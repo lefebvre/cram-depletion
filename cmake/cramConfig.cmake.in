@@ -26,6 +26,14 @@ if(@CRAM_WITH_ENDFTK@)
   find_dependency(ENDFtk)
 endif()
 
+# pugixml is PRIVATE to cram, but cram is a static library, so the exported
+# target still names pugixml::pugixml under $<LINK_ONLY:...> and the consumer's
+# link line needs it defined. Only a found (never a fetched) pugixml reaches an
+# installed cram -- see the install policy in the top-level CMakeLists.txt.
+if(@CRAM_WITH_CHAIN_XML@)
+  find_dependency(pugixml)
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/cramTargets.cmake")
 
 check_required_components(cram)

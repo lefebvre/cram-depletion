@@ -11,6 +11,13 @@ constexpr double kEvToJoule = 1.602176634e-19;
 
 }  // namespace
 
+ReactionXS reactionXs(const ChainReaction& channel, double sigmaBarn) {
+  return ReactionXS{.type = channel.type,
+                    .target = channel.target,
+                    .sigma = sigmaBarn * channel.branching,
+                    .q = channel.q};
+}
+
 DepletionSystem::DepletionSystem(const DepletionChain& chain)
     : chain_(chain), decay_(chain.decayMatrix()) {}
 

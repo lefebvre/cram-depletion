@@ -41,7 +41,8 @@ jobs:
       - name: Configure (Debug + coverage + benchmarks)
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCRAM_ENABLE_COVERAGE=ON \
-                -DCRAM_ENABLE_BENCHMARKS=ON -DCRAM_WERROR=ON
+                -DCRAM_ENABLE_BENCHMARKS=ON -DCRAM_WITH_CHAIN_XML=ON \
+                -DCRAM_WERROR=ON
 
       - name: Build
         run: cmake --build build -j
@@ -87,7 +88,7 @@ jobs:
       - name: Configure (MSVC, FetchContent pulls Eigen + GTest)
         run: >
           cmake -B build -G "Visual Studio 17 2022" -DCMAKE_BUILD_TYPE=Release
-          -DCRAM_WERROR=ON
+          -DCRAM_WITH_CHAIN_XML=ON -DCRAM_WERROR=ON
 
       - name: Build
         run: cmake --build build --config Release -j
@@ -220,7 +221,7 @@ jobs:
       - name: Build + test with ASan/UBSan
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCRAM_ENABLE_SANITIZERS=ON \
-                -DCRAM_WERROR=ON
+                -DCRAM_WITH_CHAIN_XML=ON -DCRAM_WERROR=ON
           cmake --build build -j
           ctest --test-dir build --output-on-failure
 
@@ -249,7 +250,7 @@ jobs:
       - name: Build + test with TSan
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCRAM_ENABLE_TSAN=ON \
-                -DCRAM_WERROR=ON
+                -DCRAM_WITH_CHAIN_XML=ON -DCRAM_WERROR=ON
           cmake --build build -j
           ctest --test-dir build --output-on-failure
 
@@ -267,7 +268,8 @@ jobs:
           CC: clang
           CXX: clang++
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCRAM_WERROR=ON
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCRAM_WITH_CHAIN_XML=ON \
+                -DCRAM_WERROR=ON
           cmake --build build -j
           ctest --test-dir build --output-on-failure
 
@@ -281,7 +283,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake g++ libeigen3-dev libgtest-dev cppcheck clang-tidy
       - name: Configure (exports compile_commands.json)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCRAM_WITH_CHAIN_XML=ON
       - name: cppcheck
         run: cmake --build build --target cppcheck
       # tests/ was previously outside every analyzer: cppcheck is pointed at
