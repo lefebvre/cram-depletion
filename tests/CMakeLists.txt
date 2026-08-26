@@ -33,6 +33,19 @@ include(GoogleTest)
 # failing before anything has been run.
 gtest_discover_tests(unit_tests TEST_PREFIX cram. DISCOVERY_MODE PRE_TEST)
 
+# Replays an OpenMC-generated VERA pin depletion (tests/validation/data) and
+# checks the engine reproduces OpenMC's number densities. Needs the chain
+# reader; SKIPs at run time when the data directory is absent. A separate
+# binary so the ~1 MB of reference data is parsed only by the test that uses it.
+if(CRAM_WITH_CHAIN_XML)
+  add_executable(validation_test validation/vera_pin_test.cpp)
+  target_link_libraries(validation_test PRIVATE cram cram_quality_flags cram_warning_flags
+                                                GTest::gtest_main)
+  target_compile_definitions(validation_test PRIVATE
+    CRAM_VALIDATION_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/validation/data")
+  gtest_discover_tests(validation_test TEST_PREFIX cram. DISCOVERY_MODE PRE_TEST)
+endif()
+
 # Integration test for the real ENDFtk reader. Built only with -DCRAM_WITH_ENDFTK.
 if(CRAM_WITH_ENDFTK)
   add_executable(integration_test integration/integration_test.cpp)
