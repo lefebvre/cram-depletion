@@ -11,6 +11,7 @@
 #include <Eigen/SparseCore>
 #include <cstdint>
 #include <numbers>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -23,18 +24,28 @@ constexpr double kLn2 = std::numbers::ln2;
 
 // One decay branch of a parent nuclide.
 //
-// Deliberately without default member initializers: every member is a required
-// input and zero is not an "empty" branch but a plausible-looking inert one
-// (rtyp 0 decodes to a gamma, i.e. no Z/A change, and branching 0 contributes
-// no rate). Leaving them out makes -Wmissing-field-initializers demand all four
-// at each braced initialization, so a forgotten field is a build failure rather
-// than a nuclide that silently never transmutes. Construct with braces only;
-// never declare a bare `DecayMode m;`.
+// The first four members deliberately have no default member initializers:
+// every one is a required input and zero is not an "empty" branch but a
+// plausible-looking inert one (rtyp 0 decodes to a gamma, i.e. no Z/A change,
+// and branching 0 contributes no rate). Leaving them out makes
+// -Wmissing-field-initializers demand all four at each braced initialization,
+// so a forgotten field is a build failure rather than a nuclide that silently
+// never transmutes. Construct with braces only; never declare a bare
+// `DecayMode m;`.
+//
+// `daughter` keeps an initializer because "absent" is its correct default, not a
+// placeholder: an unset daughter means "derive it from rtyp and finalState with
+// applyDecay()", which is what ENDF decay data implies. It is set only by
+// sources that name the product explicitly (an OpenMC depletion chain gives a
+// target per decay mode) so that the matrix honors the source's topology even
+// where it disagrees with the RTYP transition rules. Ignored when the mode is
+// fission.
 struct DecayMode {
-  double rtyp;       // ENDF decay-mode code (see nuclide.hpp)
-  double branching;  // branching ratio for this mode (sum over modes ~ 1)
-  int finalState;    // RFS: isomeric state of the daughter
-  bool isFission;    // spontaneous fission -> products from SFY table
+  double rtyp;                                 // ENDF decay-mode code (see nuclide.hpp)
+  double branching;                            // branching ratio for this mode (sum over modes ~ 1)
+  int finalState;                              // RFS: isomeric state of the daughter
+  bool isFission;                              // spontaneous fission -> products from SFY table
+  std::optional<Zai> daughter = std::nullopt;  // explicit product; else derived
 };
 
 // Per-nuclide decay information.
@@ -158,6 +169,14 @@ private:
   void decayTriplets(std::vector<Eigen::Triplet<double>>& t, int& dropped) const;
 
   static void warnDroppedDaughters(int dropped);
+
+  // The single tracked product of a decay mode: the explicit `daughter` when
+  // one was supplied, otherwise the nuclide applyDecay() derives from the RTYP
+  // sequence. Empty when the mode is (or encodes) fission, whose products come
+  // from the yield tables instead. Shared by close() and decayTriplets() so the
+  // daughters registered by the one are exactly the daughters produced by the
+  // other.
+  static std::optional<Zai> decayDaughter(const Zai& parent, const DecayMode& m);
 
   const YieldEntry* nearestEntry(const Zai& parent, double energy) const;
 

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -88,13 +89,10 @@ int DepletionChain::close() {
                      .a = static_cast<int>((key / 10) % 1000),
                      .i = static_cast<int>(key % 10)};
     for (const DecayMode& m : decay_.at(key).modes) {
-      if (m.isFission)
-        continue;  // fission products come from the SFY/NFY tables, not one daughter
-      bool fission = false;
-      Zai daughter = applyDecay(parent, m.rtyp, m.finalState, fission);
-      if (fission || indexOf(daughter) >= 0)
-        continue;
-      add(daughter);  // bare stable terminator -> production is never dropped
+      const std::optional<Zai> daughter = decayDaughter(parent, m);
+      if (!daughter || indexOf(*daughter) >= 0)
+        continue;      // fission products come from the SFY/NFY tables, not one daughter
+      add(*daughter);  // bare stable terminator -> production is never dropped
       ++added;
     }
   }
@@ -192,17 +190,28 @@ void DepletionChain::decayTriplets(std::vector<Eigen::Triplet<double>>& t, int& 
         continue;
       }
 
-      bool fission = false;
-      Zai daughter = applyDecay(parent, m.rtyp, m.finalState, fission);
-      if (fission)
-        continue;
-      int j = indexOf(daughter);
+      const std::optional<Zai> daughter = decayDaughter(parent, m);
+      if (!daughter)
+        continue;  // RTYP encodes fission (e.g. 1.6): no single product
+      int j = indexOf(*daughter);
       if (j >= 0)
         t.emplace_back(j, i, rate);
       else
         ++dropped;  // unregistered daughter; surfaced below instead of silently lost
     }
   }
+}
+
+std::optional<Zai> DepletionChain::decayDaughter(const Zai& parent, const DecayMode& m) {
+  if (m.isFission)
+    return std::nullopt;
+  if (m.daughter)
+    return m.daughter;
+  bool fission = false;
+  const Zai derived = applyDecay(parent, m.rtyp, m.finalState, fission);
+  if (fission)
+    return std::nullopt;
+  return derived;
 }
 
 void DepletionChain::warnDroppedDaughters(int dropped) {

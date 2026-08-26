@@ -44,7 +44,9 @@ const std::vector<Zai> kParents = {
 };
 
 DecayData betaMinus(double halfLife) {
-  return DecayData{.halfLife = halfLife, .modes = {DecayMode{1.0, 1.0, 0, false}}};
+  return DecayData{
+      .halfLife = halfLife,
+      .modes = {DecayMode{.rtyp = 1.0, .branching = 1.0, .finalState = 0, .isFission = false}}};
 }
 
 // The nuclides close() appended, in the order it appended them.
@@ -172,7 +174,11 @@ TEST(DecayMatrix, SingleDecayEntries) {
   const Zai A{53, 135, 0}, B{54, 135, 0};
   c.add(A);
   c.add(B);
-  c.setDecay(A, DecayData{.halfLife = 100.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});  // A -> B
+  c.setDecay(
+      A, DecayData{
+             .halfLife = 100.0,
+             .modes = {DecayMode{
+                 .rtyp = 1.0, .branching = 1.0, .finalState = 0, .isFission = false}}});  // A -> B
 
   auto M = c.decayMatrix();
   const double lam = kLn2 / 100.0;
@@ -189,8 +195,12 @@ TEST(DecayMatrix, BranchingSplitsByRatio) {
   c.add(B);
   c.add(D);
   // beta- (Z+1 -> B) with BR 0.7 ; neutron emission (A-1 -> D) with BR 0.3
-  c.setDecay(A, DecayData{.halfLife = 10.0,
-                          .modes = {DecayMode{1.0, 0.7, 0, false}, DecayMode{5.0, 0.3, 0, false}}});
+  c.setDecay(
+      A, DecayData{
+             .halfLife = 10.0,
+             .modes = {
+                 DecayMode{.rtyp = 1.0, .branching = 0.7, .finalState = 0, .isFission = false},
+                 DecayMode{.rtyp = 5.0, .branching = 0.3, .finalState = 0, .isFission = false}}});
 
   auto M = c.decayMatrix();
   const double lam = kLn2 / 10.0;
@@ -208,8 +218,14 @@ TEST(DecayMatrix, ConservativeChainHasZeroColumnSums) {
   c.add(A);
   c.add(B);
   c.add(D);
-  c.setDecay(A, DecayData{.halfLife = 100.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});
-  c.setDecay(B, DecayData{.halfLife = 300.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});
+  c.setDecay(A,
+             DecayData{.halfLife = 100.0,
+                       .modes = {DecayMode{
+                           .rtyp = 1.0, .branching = 1.0, .finalState = 0, .isFission = false}}});
+  c.setDecay(B,
+             DecayData{.halfLife = 300.0,
+                       .modes = {DecayMode{
+                           .rtyp = 1.0, .branching = 1.0, .finalState = 0, .isFission = false}}});
 
   auto M = c.decayMatrix();
   for (int col = 0; col < M.cols(); ++col) {
@@ -226,8 +242,14 @@ TEST(DecayMatrix, ConservativeChainHasZeroColumnSums) {
 TEST(Chain, CloseRegistersDaughtersAndRestoresConservation) {
   DepletionChain c;
   const Zai A{53, 135, 0}, B{54, 135, 0};  // I-135 -> Xe-135 -> Cs-135
-  c.setDecay(A, DecayData{.halfLife = 100.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});
-  c.setDecay(B, DecayData{.halfLife = 300.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});
+  c.setDecay(A,
+             DecayData{.halfLife = 100.0,
+                       .modes = {DecayMode{
+                           .rtyp = 1.0, .branching = 1.0, .finalState = 0, .isFission = false}}});
+  c.setDecay(B,
+             DecayData{.halfLife = 300.0,
+                       .modes = {DecayMode{
+                           .rtyp = 1.0, .branching = 1.0, .finalState = 0, .isFission = false}}});
   EXPECT_EQ(c.indexOf({55, 135, 0}), -1);  // daughter absent -> would be dropped
 
   EXPECT_EQ(c.close(), 1);  // Cs-135 registered
@@ -250,7 +272,10 @@ TEST(DecayMatrix, SpontaneousFissionFeedsYields) {
   FissionYields sfy{.energy = 0.0, .products = {{P1, 1.2}, {P2, 0.8}}};
   c.addFissionYields(Cf, sfy);
   // single SF branch, branching 1.0
-  c.setDecay(Cf, DecayData{.halfLife = 8.3e8, .modes = {DecayMode{6.0, 1.0, 0, true}}});
+  c.setDecay(Cf,
+             DecayData{.halfLife = 8.3e8,
+                       .modes = {DecayMode{
+                           .rtyp = 6.0, .branching = 1.0, .finalState = 0, .isFission = true}}});
 
   auto M = c.decayMatrix();
   const double lam = kLn2 / 8.3e8;
@@ -339,7 +364,10 @@ TEST(DecayMatrix, SpontaneousFissionWithoutYieldsJustRemoves) {
   DepletionChain c;
   const Zai Cm{96, 244, 0};
   c.add(Cm);
-  c.setDecay(Cm, DecayData{.halfLife = 5.7e8, .modes = {DecayMode{6.0, 1.0, 0, true}}});
+  c.setDecay(Cm,
+             DecayData{.halfLife = 5.7e8,
+                       .modes = {DecayMode{
+                           .rtyp = 6.0, .branching = 1.0, .finalState = 0, .isFission = true}}});
   auto M = c.decayMatrix();
   const double lam = kLn2 / 5.7e8;
   int i = c.indexOf(Cm);
@@ -355,8 +383,14 @@ TEST(DecayMatrix, SpontaneousFissionWithoutYieldsJustRemoves) {
 // scrape stderr.
 TEST(DecayMatrix, ReportsDroppedDaughtersThroughTheOutParameter) {
   DepletionChain c;
-  c.setDecay({40, 97, 0}, DecayData{.halfLife = 1000.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});
-  c.setDecay({52, 133, 0}, DecayData{.halfLife = 900.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});
+  c.setDecay({40, 97, 0},
+             DecayData{.halfLife = 1000.0,
+                       .modes = {DecayMode{
+                           .rtyp = 1.0, .branching = 1.0, .finalState = 0, .isFission = false}}});
+  c.setDecay({52, 133, 0},
+             DecayData{.halfLife = 900.0,
+                       .modes = {DecayMode{
+                           .rtyp = 1.0, .branching = 1.0, .finalState = 0, .isFission = false}}});
 
   int dropped = -1;
   auto before = c.decayMatrix(&dropped);
@@ -397,7 +431,10 @@ TEST(DecayMatrix, FissionInMultiStepRtypIsSkipped) {
   c.add(dummy);
   // isFission=false but RTYP contains code 6 -> applyDecay flags fission
   // and the production triplet must be omitted.
-  c.setDecay(parent, DecayData{.halfLife = 1.0e9, .modes = {DecayMode{1.6, 1.0, 0, false}}});
+  c.setDecay(parent,
+             DecayData{.halfLife = 1.0e9,
+                       .modes = {DecayMode{
+                           .rtyp = 1.6, .branching = 1.0, .finalState = 0, .isFission = false}}});
   auto M = c.decayMatrix();
   EXPECT_NEAR(M.coeff(c.indexOf(parent), c.indexOf(parent)), -(kLn2 / 1.0e9), 1e-20);
   // No production of the would-be daughter, since fission was encoded.
@@ -410,9 +447,85 @@ TEST(DecayMatrix, UnregisteredDaughterIsDropped) {
   DepletionChain c;
   const Zai A{53, 135, 0};  // beta- -> Xe-135, which we deliberately omit
   c.add(A);
-  c.setDecay(A, DecayData{.halfLife = 100.0, .modes = {DecayMode{1.0, 1.0, 0, false}}});
+  c.setDecay(A,
+             DecayData{.halfLife = 100.0,
+                       .modes = {DecayMode{
+                           .rtyp = 1.0, .branching = 1.0, .finalState = 0, .isFission = false}}});
   auto M = c.decayMatrix();
   EXPECT_EQ(c.indexOf({54, 135, 0}), -1);              // daughter absent
   EXPECT_NEAR(M.coeff(0, 0), -(kLn2 / 100.0), 1e-15);  // parent still removed
   EXPECT_EQ(M.nonZeros(), 1);                          // no production term added
+}
+
+// ---------------------------------------------------------------------------
+// Explicit decay daughters
+// ---------------------------------------------------------------------------
+// A source that names the product of a decay mode (an OpenMC depletion chain
+// does) must have that product honored even where the RTYP transition rules
+// would derive a different one.
+TEST(DecayMatrix, ExplicitDaughterOverridesRtypDerivedOne) {
+  DepletionChain c;
+  const Zai A{1, 100, 0}, derived{2, 100, 0}, named{3, 100, 0};
+  c.add(A);
+  c.add(derived);
+  c.add(named);
+  // rtyp 1.0 (beta-) would produce `derived`; the explicit daughter says `named`.
+  c.setDecay(A, DecayData{.halfLife = 10.0,
+                          .modes = {DecayMode{.rtyp = 1.0,
+                                              .branching = 1.0,
+                                              .finalState = 0,
+                                              .isFission = false,
+                                              .daughter = named}}});
+  auto M = c.decayMatrix();
+  const double lam = kLn2 / 10.0;
+  EXPECT_NEAR(M.coeff(c.indexOf(A), c.indexOf(A)), -lam, 1e-15);
+  EXPECT_NEAR(M.coeff(c.indexOf(named), c.indexOf(A)), lam, 1e-15);
+  EXPECT_EQ(M.coeff(c.indexOf(derived), c.indexOf(A)), 0.0);
+}
+
+// close() must register the same daughter decayTriplets() will produce, so an
+// explicit daughter that is not yet in the chain is what close() adds.
+TEST(Chain, CloseRegistersExplicitDaughter) {
+  DepletionChain c;
+  const Zai A{1, 100, 0}, named{3, 100, 0};
+  c.setDecay(A, DecayData{.halfLife = 10.0,
+                          .modes = {DecayMode{.rtyp = 1.0,
+                                              .branching = 1.0,
+                                              .finalState = 0,
+                                              .isFission = false,
+                                              .daughter = named}}});
+  EXPECT_EQ(c.indexOf(named), -1);
+  EXPECT_EQ(c.indexOf({2, 100, 0}), -1);
+
+  EXPECT_EQ(c.close(), 1);
+  EXPECT_GE(c.indexOf(named), 0);
+  EXPECT_EQ(c.indexOf({2, 100, 0}), -1) << "the rtyp-derived daughter is not registered";
+
+  int dropped = -1;
+  auto M = c.decayMatrix(&dropped);
+  EXPECT_EQ(dropped, 0);
+  for (int col = 0; col < M.cols(); ++col) {
+    double sum = 0.0;
+    for (int row = 0; row < M.rows(); ++row)
+      sum += M.coeff(row, col);
+    EXPECT_NEAR(sum, 0.0, 1e-18) << "column " << col;
+  }
+}
+
+// An explicit daughter on a fission mode is meaningless and must be ignored:
+// the products come from the yield table, and close() must not register it.
+TEST(DecayMatrix, ExplicitDaughterIgnoredForFissionMode) {
+  DepletionChain c;
+  const Zai Cm{96, 244, 0}, bogus{1, 1, 0};
+  c.add(Cm);
+  c.setDecay(Cm, DecayData{.halfLife = 5.7e8,
+                           .modes = {DecayMode{.rtyp = 6.0,
+                                               .branching = 1.0,
+                                               .finalState = 0,
+                                               .isFission = true,
+                                               .daughter = bogus}}});
+  EXPECT_EQ(c.close(), 0);
+  EXPECT_EQ(c.indexOf(bogus), -1);
+  auto M = c.decayMatrix();
+  EXPECT_EQ(M.nonZeros(), 1);  // removal only; no SFY table supplied
 }
