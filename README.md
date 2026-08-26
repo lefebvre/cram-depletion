@@ -23,6 +23,7 @@ cram/burnup_matrix.cpp   matrix assembly (decay, fission source, reactions)
 cram/reaction.hpp        neutron reaction channels, products, OpenMC reaction names
 cram/integrator.hpp      time integrators (predictor, CE/CM, CE/LI, LE/QI, CF4)
 cram/deplete.hpp         DepletionSystem: fixed one-group XS, constant flux or power
+cram/adjoint.hpp         adjoint (importance) solves for linear systems
 cram/chain_xml.cpp       OpenMC depletion_chain XML reader (optional, pugixml)
 cram/endf_reader.cpp     ENDFtk ingestion (optional, see notes)
 cram-apps/deplete.cpp    runnable demo + ENDF driver
@@ -202,6 +203,7 @@ tests/test_cram.cpp      CRAM16/CRAM48 vs analytic; mass, stiffness, edge cases
 tests/test_reaction.cpp  reaction products and OpenMC reaction names
 tests/test_integrator.cpp order-of-accuracy study; exactness under constant flux
 tests/test_deplete.cpp   DepletionSystem: normalization, validation, trajectories
+tests/test_adjoint.cpp   duality identity, analytic importance, piecewise marches
 tests/test_chain_xml.cpp OpenMC chain reader (CRAM_WITH_CHAIN_XML only)
 tests/validation/        replay of OpenMC-generated VERA pin data (CRAM_WITH_CHAIN_XML only)
 tests/integration/       real ENDFtk reader vs real ENDF data (WITH_ENDFTK only)
