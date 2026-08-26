@@ -203,9 +203,38 @@ tests/test_reaction.cpp  reaction products and OpenMC reaction names
 tests/test_integrator.cpp order-of-accuracy study; exactness under constant flux
 tests/test_deplete.cpp   DepletionSystem: normalization, validation, trajectories
 tests/test_chain_xml.cpp OpenMC chain reader (CRAM_WITH_CHAIN_XML only)
+tests/validation/        replay of OpenMC-generated VERA pin data (CRAM_WITH_CHAIN_XML only)
 tests/integration/       real ENDFtk reader vs real ENDF data (WITH_ENDFTK only)
 testing/depletion_pin_fixture.hpp  hand-built thermal-pin chain + one-group XS
 ```
+
+## Validation against OpenMC (VERA depletion benchmark)
+
+The depletion engine mirrors the validation approach of OpenMC's depletion
+module (Yu & Forget, *Ann. Nucl. Energy* 170 (2022) 108973, which verifies
+OpenMC against the VERA depletion benchmark). Two layers, both transport-free:
+
+1. **Integrator order-of-accuracy** (`tests/test_integrator.cpp`, always in CI).
+   The predictor / CE-CM / CE-LI / LE-QI / CF4 integrators (`cram/integrator.hpp`,
+   coefficients matching OpenMC's `openmc.deplete`) are marched over a
+   constant-power pin problem at refining time steps; the observed convergence
+   orders (≈1 predictor, ≈2 CE/CM·CE/LI·LE/QI, ≈4 CF4) reproduce the paper's
+   §4.5 / Figs 15–18. When the flux is held fixed (`A` constant) every scheme
+   collapses to the exact `exp(A·dt)`, which is also checked.
+
+2. **Engine reproduction of OpenMC** (`tests/validation/`, with
+   `CRAM_WITH_CHAIN_XML`). OpenMC runs a fixed-cross-section VERA pin depletion
+   (ENDF/B-VIII.0, simplified CASL chain) with its predictor; given the same
+   chain + one-group micro cross sections + flux, this engine's predictor march
+   reproduces OpenMC's number densities to **< 1e-3** for every benchmark
+   nuclide of interest (U/Np/Pu/Am isotopes, Xe-135, Cs-137, Nd-148, Sm-149,
+   Gd-157 — the major ones to ~1e-5). This checks matrix assembly + CRAM,
+   isolated from the transport / cross-section error a transport-free engine
+   cannot reproduce. The committed reference data for case `vera_pin1a` lives
+   under `tests/validation/data/`; regenerate or add cases offline with
+   [validation/openmc/generate_vera_pin.py](validation/openmc/). The test SKIPs
+   (never fails) when the data directory is absent, so a clean checkout without
+   it still passes.
 
 ## How CRAM works here
 

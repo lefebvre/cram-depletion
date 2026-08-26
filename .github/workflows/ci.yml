@@ -20,6 +20,7 @@ jobs:
             cram-apps/*.cpp \
             tests/*.hpp tests/*.cpp \
             tests/integration/*.cpp \
+            tests/validation/*.cpp \
             testing/*.hpp \
             bench/*.cpp
 
