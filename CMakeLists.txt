@@ -346,6 +346,42 @@ endif()
 add_executable(deplete cram-apps/deplete.cpp)
 target_link_libraries(deplete PRIVATE cram cram_warning_flags)
 
+# --- validation report ------------------------------------------------------
+# Replays a reference case and writes the whole comparison as JSON; the Python
+# renderer beside it turns that into the report. Needs the chain reader, since
+# the reference case carries its chain as OpenMC XML. The measurement half is a
+# normal build target so it cannot bit-rot; rendering is a separate step because
+# it is the only part that wants Python.
+if(CRAM_WITH_CHAIN_XML)
+  add_executable(vera_report validation/report/vera_report.cpp)
+  target_link_libraries(vera_report PRIVATE cram cram_warning_flags)
+  target_compile_definitions(vera_report PRIVATE
+    CRAM_VALIDATION_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/validation/data")
+
+  set(CRAM_REPORT_DIR "${CMAKE_BINARY_DIR}/validation")
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    set(_cram_render
+      COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/validation/report/render_report.py"
+              "${CRAM_REPORT_DIR}/vera_report.json"
+              -o "${CRAM_REPORT_DIR}/vera_validation_report.html")
+  else()
+    set(_cram_render
+      COMMAND ${CMAKE_COMMAND} -E echo
+              "validation-report: no Python 3 interpreter; wrote JSON only")
+  endif()
+
+  add_custom_target(validation-report
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CRAM_REPORT_DIR}"
+    COMMAND $<TARGET_FILE:vera_report>
+            --data "${CMAKE_SOURCE_DIR}/tests/validation/data"
+            --out "${CRAM_REPORT_DIR}/vera_report.json"
+    ${_cram_render}
+    DEPENDS vera_report
+    VERBATIM
+    COMMENT "Regenerating the OpenMC validation report into ${CRAM_REPORT_DIR}")
+endif()
+
 # --- tests ------------------------------------------------------------------
 include(CTest)
 if(CRAM_ENABLE_TESTS)

@@ -80,6 +80,50 @@ jobs:
           fail_ci_if_error: false
           flags: unittests
 
+  # Regenerates the OpenMC validation report from the committed reference data and
+  # publishes it as an artifact, so every commit carries a reproducible statement
+  # of how this engine compares against OpenMC rather than a number quoted in prose.
+  # Deliberately not a gate: --fail-over-tolerance is what turns it into one, and
+  # the count to hold the line at belongs in a follow-up once the known
+  # deviations it reports are resolved.
+  validation-report:
+    needs: format-check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libeigen3-dev libgtest-dev
+      - name: Configure (chain reader on; pugixml via FetchContent)
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCRAM_WITH_CHAIN_XML=ON \
+                -DCRAM_ENABLE_TESTS=OFF -DCRAM_WERROR=ON
+      - name: Regenerate the validation report
+        run: cmake --build build --target validation-report -j
+      - name: Report summary
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          d = json.load(open("build/validation/vera_report.json"))
+          s, b = d["summary"], d["summary"]["benchmark_subset"]
+          print(f"## Validation vs OpenMC — `{d['case']['name']}`\n")
+          print(f"| metric | value |\n| --- | --- |")
+          print(f"| nuclides compared | {s['compared']} |")
+          print(f"| over {d['tolerance']:.0e} | **{s['over_tolerance']}** |")
+          print(f"| worst | {s['worst']:.4e} ({s['worst_nuclide']}) |")
+          print(f"| median | {s['median']:.4e} |")
+          print(f"| benchmark subset over tolerance | {b['over_tolerance']} of {b['compared']} |")
+          print(f"\nFull report in the `validation-report` artifact.")
+          PY
+      - name: Upload validation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-report
+          path: |
+            build/validation/vera_validation_report.html
+            build/validation/vera_report.json
+
   windows-build-test:
     needs: format-check
     runs-on: windows-2022
