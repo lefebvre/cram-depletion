@@ -254,6 +254,7 @@ add_library(cram
   cram/reaction.cpp
   cram/integrator.cpp
   cram/deplete.cpp
+  cram/adjoint.cpp
   cram/chain_xml.cpp
   cram/endf_reader.cpp)
 # Headers are included as "cram/<name>.hpp", so the include root is the
@@ -485,6 +486,7 @@ if(CRAM_ENABLE_INSTALL)
     cram/reaction.hpp
     cram/integrator.hpp
     cram/deplete.hpp
+    cram/adjoint.hpp
     cram/chain_xml.hpp
     cram/endf_reader.hpp
     ${CRAM_GENERATED_INCLUDE_DIR}/cram/version.hpp
