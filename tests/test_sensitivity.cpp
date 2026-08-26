@@ -218,16 +218,25 @@ TEST(Sensitivity, CaptureCrossSectionSensitivityMatchesFiniteDifference) {
 
 // Refining the quadrature converges: the fine rule and a finer one agree far
 // more closely than the coarse rule agrees with either.
+//
+// Run on the first two intervals rather than the whole schedule. Cost here is
+// (nodes per interval) x (intervals), and four rules are evaluated, which made
+// this the most expensive test in the suite by a factor of two -- while what it
+// measures, the convergence of a quadrature rule, is a property of the rule.
+// Two intervals still carry a flux change, and the finite-difference tests
+// above cover the full schedule at the fine rule.
 TEST(Sensitivity, QuadratureConverges) {
   Problem p;
   p.build();
+  const std::vector<double> dts(kDts.begin(), kDts.begin() + 2);
+  const std::vector<Eigen::SparseMatrix<double>> A(p.A.begin(), p.A.begin() + 2);
   const Eigen::VectorXd w = unit(p.chain, kCs135);
-  const DepletionResult fwd = depleteLinear(p.A, kDts, initialPinComposition(p.chain));
-  const AdjointResult adj = adjointDeplete(p.A, kDts, w);
+  const DepletionResult fwd = depleteLinear(A, dts, initialPinComposition(p.chain));
+  const AdjointResult adj = adjointDeplete(A, dts, w);
   const int iXe = p.chain.indexOf(kXe135);
 
   auto xeSensitivity = [&](SensitivityOptions o) {
-    return decayConstantSensitivities(p.chain, rateSensitivities(fwd, adj, p.A, kDts, o))(iXe);
+    return decayConstantSensitivities(p.chain, rateSensitivities(fwd, adj, A, dts, o))(iXe);
   };
   const double coarse = xeSensitivity({.gaussPoints = 3, .subIntervals = 1, .endRefinements = 0});
   const double defaults = xeSensitivity({});
@@ -252,7 +261,92 @@ TEST(Sensitivity, RejectsBadOptionsAndMismatchedInputs) {
   const std::vector<double> shortDts(kDts.begin(), kDts.end() - 1);
   const std::vector<Eigen::SparseMatrix<double>> shortA(p.A.begin(), p.A.end() - 1);
   EXPECT_THROW(rateSensitivities(fwd, adj, shortA, shortDts), std::invalid_argument);
-  const auto S = rateSensitivities(fwd, adj, p.A, kDts);
+  // The coarsest rule there is: what follows needs an S of the right shape, not
+  // an accurate one, and the default rule costs ~80x as much to build it.
+  const auto S = rateSensitivities(fwd, adj, p.A, kDts,
+                                   {.gaussPoints = 1, .subIntervals = 1, .endRefinements = 0});
   EXPECT_THROW(reactionSensitivities(p.system(), S, {1.0}), std::invalid_argument);
   EXPECT_THROW(sourceGenerator(p.A[0], Eigen::VectorXd::Zero(2)), std::invalid_argument);
+}
+
+// A channel whose cross section is zero still has a derivative: raising it off
+// zero moves the inventory. The integrals that derivative contracts have to be
+// carried in S even though the channel contributes no entry to any A_k, or the
+// removal term is applied against a production term that was never integrated
+// and what comes back is half a derivative -- here with the sign inverted.
+//
+//   A --decay--> C ,  A --(n,gamma) sigma=0--> B --decay--> C ,  R = C(T)
+//
+// The three nuclides are arbitrary: every daughter here is set explicitly, so
+// the topology is the one drawn above and not the one their Z and A imply.
+//
+// B decays to C an order of magnitude faster than A does, so a capture that
+// reroutes A through B can only add C by the end: dR/dsigma > 0.
+TEST(Sensitivity, ZeroCrossSectionChannelHasTheDerivativeOfTheLimit) {
+  const Zai kA{.z = 60, .a = 147, .i = 0}, kB{.z = 60, .a = 148, .i = 0},
+      kC{.z = 61, .a = 147, .i = 0};
+  const std::vector<double> dts = {5.0 * kDay, 20.0 * kDay};
+  const std::vector<double> flux = {3.0e14, 2.0e14};
+
+  DepletionChain chain;
+  const auto to = [](const Zai& daughter) {
+    return DecayMode{
+        .rtyp = 0.0, .branching = 1.0, .finalState = 0, .isFission = false, .daughter = daughter};
+  };
+  chain.add(kA);
+  chain.add(kB);
+  chain.add(kC);
+  chain.setDecay(kA, DecayData{.halfLife = 1.0e6, .modes = {to(kC)}});
+  chain.setDecay(kB, DecayData{.halfLife = 1.0e5, .modes = {to(kC)}});
+
+  Eigen::VectorXd n0 = Eigen::VectorXd::Zero(chain.size());
+  n0(chain.indexOf(kA)) = 1.0;
+  const Eigen::VectorXd w = unit(chain, kC);
+
+  const auto matrices = [&](double sigma) {
+    DepletionSystem sys(chain);
+    sys.setConstantFlux(0.0);
+    sys.setReactions(kA, {capture(kB, sigma)});
+    return intervalMatrices(sys, flux);
+  };
+  const auto response = [&](double sigma) {
+    return w.dot(depleteLinear(matrices(sigma), dts, n0).n.back());
+  };
+
+  DepletionSystem sys(chain);
+  sys.setConstantFlux(0.0);
+  sys.setReactions(kA, {capture(kB, 0.0)});
+  const auto A = intervalMatrices(sys, flux);
+  const auto fwd = depleteLinear(A, dts, n0);
+  const auto adj = adjointDeplete(A, dts, w);
+  const auto S = rateSensitivities(fwd, adj, A, dts, kFine);
+  const auto sens = reactionSensitivities(sys, S, flux);
+  ASSERT_EQ(sens.size(), 1u);
+  const double reported = sens[0].dRdSigma;
+
+  // One-sided (sigma cannot go below zero) but second-order accurate, so the
+  // comparison is against the derivative and not against the step size.
+  const double h = 1.0e-3;  // barn
+  const double fd = (-3.0 * response(0.0) + 4.0 * response(h) - response(2.0 * h)) / (2.0 * h);
+  EXPECT_GT(reported, 0.0) << "a faster route to C can only add C";
+  EXPECT_NEAR(reported, fd, 2.0e-3 * std::abs(fd));
+}
+
+// An empty schedule is a valid one: the marchers return their single initial
+// point for it, and the sensitivities are empty rather than an out-of-bounds
+// read of the first interval matrix.
+TEST(Sensitivity, EmptyScheduleGivesEmptySensitivities) {
+  Problem p;
+  p.build();
+  const Eigen::VectorXd n0 = initialPinComposition(p.chain);
+  const auto fwd = depleteLinear({}, {}, n0);
+  const auto adj = adjointDeplete({}, {}, unit(p.chain, kXe135));
+  ASSERT_EQ(fwd.n.size(), 1u);
+  ASSERT_EQ(adj.nStar.size(), 1u);
+
+  const auto S = rateSensitivities(fwd, adj, {}, {});
+  EXPECT_TRUE(S.empty());
+  EXPECT_TRUE(decayConstantSensitivities(p.chain, S).isZero());
+  for (const auto& r : reactionSensitivities(p.system(), S, {}))
+    EXPECT_DOUBLE_EQ(r.dRdSigma, 0.0);
 }

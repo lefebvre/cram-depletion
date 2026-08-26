@@ -108,6 +108,13 @@ AdjointResult adjointDepleteIntegrated(const std::vector<Eigen::SparseMatrix<dou
 // overwritten by each interval's value and left at the last one); a
 // constant-power system throws std::invalid_argument, since its matrix depends
 // on the composition and no single A_k represents the interval.
+//
+// Every matrix carries a structural entry for every channel of the system --
+// including channels with a zero cross section, and every entry of a zero-flux
+// interval -- stored as an explicit zero. The values are those of
+// assemble(); the structure is what rateSensitivities() integrates over and
+// what reactionSensitivities() requires, so matrices built any other way can
+// leave a channel's derivative unavailable.
 std::vector<Eigen::SparseMatrix<double>> intervalMatrices(DepletionSystem& system,
                                                           const std::vector<double>& flux);
 
@@ -139,10 +146,13 @@ struct SensitivityOptions {
 
 // S_k(i, j) = integral over interval k of n*_i(t) n_j(t) dt, one matrix per
 // interval, restricted to the union of the A_k sparsity patterns -- every entry
-// a decay constant or cross section can move. An entry outside that pattern
-// (a channel whose cross section is zero on every interval) has no
-// sensitivity here. dR/dn0 is not computed by this function: it is
-// adj.nStar.front(). `fwd` and `adj` must come from depleteLinear() and
+// a decay constant or cross section can move. An entry outside that pattern is
+// not an integral that came out zero, it is one that was never taken, and the
+// contractions below refuse to report a derivative that depends on one; build
+// A with intervalMatrices(), which carries the structure of every channel
+// whatever its cross section. An empty schedule gives an empty result.
+// dR/dn0 is not computed by this function: it is adj.nStar.front(). `fwd` and
+// `adj` must come from depleteLinear() and
 // adjointDeplete()/adjointDepleteIntegrated() over the same A and dts.
 std::vector<Eigen::SparseMatrix<double>> rateSensitivities(
     const DepletionResult& fwd, const AdjointResult& adj,
@@ -160,6 +170,8 @@ Eigen::VectorXd decayConstantSensitivities(const DepletionChain& chain,
 // system.reactions(). Contracts each S_k with flux[k] * 1e-24 * dA/d(sigma):
 // -1 on the parent diagonal, +1 at a tracked target, +yield at each fission
 // product (yields at the channel's energy). flux.size() must equal S.size().
+// Throws std::invalid_argument if S does not carry an entry for every one of
+// those positions -- see rateSensitivities() above.
 struct ReactionSensitivity {
   Zai parent;
   ReactionType type;
