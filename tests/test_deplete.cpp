@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -173,4 +174,102 @@ TEST(Deplete, TrajectoryShape) {
   const int iU235 = chain.indexOf(kU235);
   for (std::size_t k = 1; k < res.n.size(); ++k)
     EXPECT_LT(res.n[k](iU235), res.n[k - 1](iU235));
+}
+
+// A fissionable nuclide the chain carries no yield table for (a chain trimmed
+// of its yields, or one whose delegated yields never resolved) must still be
+// consumed by its fission channel. Dropping the channel whole leaves the
+// parent untouched while fissionPowerWeight() keeps crediting its energy
+// release, so a constant-power calculation holds a power the matrix never
+// delivers and the material under-burns.
+TEST(Deplete, FissionWithoutYieldsStillConsumesTheParent) {
+  DepletionChain chain = buildPinChain();  // U238 gets a fission xs, but no yields
+  ASSERT_EQ(chain.nearestYields(kU238, 0.0253), nullptr);
+  DepletionSystem sys(chain);
+  sys.setConstantFlux(1.0e14);
+  sys.setReactions(kU238, {fission(0.05)});
+
+  const Eigen::SparseMatrix<double> A = sys.assemble(initialPinComposition(chain));
+  const int i = chain.indexOf(kU238);
+  const double expected = -0.05 * 1e-24 * 1.0e14;
+  EXPECT_NEAR(A.coeff(i, i), expected, 1e-12 * std::abs(expected));
+  double colSum = 0.0;
+  for (int r = 0; r < A.rows(); ++r)
+    colSum += A.coeff(r, i);
+  EXPECT_NEAR(colSum, A.coeff(i, i), 1e-12 * std::abs(expected)) << "no products tracked";
+}
+
+// Every fission the power normalization pays for is a fission the matrix
+// performs: with only fission channels active, each parent's diagonal is its
+// fission rate, and those rates must reproduce the requested power exactly.
+// U238 here has no yield table, which is the case that used to go missing.
+TEST(Deplete, ConstantPowerMatchesTheFissionsTheMatrixPerforms) {
+  DepletionChain chain = buildPinChain();
+  DepletionSystem sys(chain);
+  sys.setReactions(kU235, {fission(38.0)});
+  sys.setReactions(kU238, {fission(0.05)});
+  const Eigen::VectorXd n = initialPinComposition(chain);
+  sys.setConstantFlux(1.0e14);
+  const double target = sys.powerFor(n);
+  sys.setConstantPower(target);
+
+  const Eigen::SparseMatrix<double> A = sys.assemble(n);
+  constexpr double kEvToJoule = 1.602176634e-19;
+  double delivered = 0.0;
+  for (const Zai& z : {kU235, kU238}) {
+    const int i = chain.indexOf(z);
+    delivered += n(i) * -A.coeff(i, i) * kFissionQ * kEvToJoule;
+  }
+  EXPECT_NEAR(delivered, target, 1e-12 * target);
+}
+
+// A negative flux or power runs every reaction backwards; a non-finite one
+// poisons the factorization of every matrix assembled from it. Neither has a
+// reading, and both are rejected without disturbing the current mode.
+TEST(Deplete, NonFiniteOrNegativeNormalizationIsRejected) {
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double inf = std::numeric_limits<double>::infinity();
+  DepletionChain chain = buildPinChain();
+  DepletionSystem sys(chain);
+  configurePinReactions(sys);
+  sys.setConstantFlux(2.0e14);
+
+  for (double bad : {-1.0, nan, inf}) {
+    EXPECT_THROW(sys.setConstantFlux(bad), std::invalid_argument);
+    EXPECT_THROW(sys.setConstantPower(bad), std::invalid_argument);
+  }
+  EXPECT_EQ(sys.normalization(), DepletionSystem::Normalization::ConstantFlux);
+  EXPECT_DOUBLE_EQ(sys.fluxFor(initialPinComposition(chain)), 2.0e14);
+}
+
+// The decay half of the matrix is cached at construction, the reaction half is
+// sized from the chain as it stands at assemble(). Growing the chain in
+// between -- which is exactly what the constructor's own "call close() before
+// building the matrix" warning invites -- must not mix the two.
+TEST(Deplete, ChainModifiedAfterConstructionIsRefused) {
+  const Zai kCm242{.z = 96, .a = 242, .i = 0};  // alpha -> Pu238, absent here
+  DepletionChain chain = buildPinChain();
+  DepletionSystem sys(chain);
+  configurePinReactions(sys);
+  sys.setConstantFlux(1.0e14);
+  const Eigen::VectorXd n = initialPinComposition(chain);
+  EXPECT_NO_THROW(sys.assemble(n));
+
+  chain.setDecay(
+      kCm242, DecayData{.halfLife = 1.4e7,
+                        .modes = {DecayMode{
+                            .rtyp = 4.0, .branching = 1.0, .finalState = 0, .isFission = false}}});
+  EXPECT_THROW(sys.assemble(n), std::logic_error);
+
+  EXPECT_EQ(chain.close(), 1);  // registers Pu238
+  EXPECT_THROW(sys.assemble(n), std::logic_error);
+
+  sys.refreshChain();
+  Eigen::VectorXd grown = Eigen::VectorXd::Zero(chain.size());
+  grown.head(n.size()) = n;
+  const Eigen::SparseMatrix<double> A = sys.assemble(grown);
+  EXPECT_EQ(A.rows(), chain.size());
+  const int cm = chain.indexOf(kCm242);
+  EXPECT_LT(A.coeff(cm, cm), 0.0);
+  EXPECT_GT(A.coeff(chain.indexOf({94, 238, 0}), cm), 0.0);
 }
