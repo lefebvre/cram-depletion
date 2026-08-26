@@ -7,7 +7,8 @@ add_executable(unit_tests
   test_cram_golden.cpp
   test_integrator.cpp
   test_deplete.cpp
-  test_adjoint.cpp)
+  test_adjoint.cpp
+  test_sensitivity.cpp)
 
 # The reader's tests need the reader; the stub-throws test lives in
 # test_chain.cpp beside the ENDFtk one and always runs.
