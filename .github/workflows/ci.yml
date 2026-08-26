@@ -22,6 +22,7 @@ jobs:
             tests/integration/*.cpp \
             tests/validation/*.cpp \
             testing/*.hpp \
+            validation/*.hpp validation/report/*.cpp \
             bench/*.cpp
 
   build-test-coverage:
@@ -84,8 +85,9 @@ jobs:
   # publishes it as an artifact, so every commit carries a reproducible statement
   # of how this engine compares against OpenMC rather than a number quoted in prose.
   # Deliberately not a gate: --fail-over-tolerance is what turns it into one, and
-  # the count to hold the line at belongs in a follow-up once the known
-  # deviations it reports are resolved.
+  # the line is held by the regression test instead, which now asserts the same
+  # tolerance nuclide by nuclide over the whole reference. This job stays a
+  # measurement, and reports the margin rather than only whether it was met.
   validation-report:
     needs: format-check
     runs-on: ubuntu-24.04
@@ -334,8 +336,11 @@ jobs:
       # tests/ was previously outside every analyzer: cppcheck is pointed at
       # cram/ only and this step listed cram/*.cpp, so nothing ever inspected
       # test sources.
+      # tests/validation/ and validation/report/ are named separately because
+      # tests/*.cpp does not match a subdirectory, and they are the sources
+      # doing raw external-data parsing -- the ones with the most to gain.
       - name: clang-tidy
-        run: clang-tidy -p build cram/*.cpp tests/*.cpp
+        run: clang-tidy -p build cram/*.cpp tests/*.cpp tests/validation/*.cpp validation/report/*.cpp
 
   endftk-integration:
     needs: format-check

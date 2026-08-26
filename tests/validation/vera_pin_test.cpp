@@ -24,8 +24,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <map>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -91,31 +93,52 @@ TEST_P(VeraPin, ReproducesOpenMCPredictorTrajectory) {
     n = integ->step(n, c.dt[s]);
   }
 
-  // Compare the benchmark's nuclides of interest at end of life. We check this
-  // curated set rather than the worst of every tracked nuclide: deep-chain
-  // trace actinides (~1e13 atoms, >9 orders below U-238) are sensitive to
-  // metastable/branching subtleties of the simplified chain and differ at the
-  // percent level -- the same regime where OpenMC and Serpent themselves
-  // disagree in the paper. The actinides and fission products the benchmark
-  // actually reports reproduce OpenMC's CRAM solve to < 1e-3.
-  static const char* kImportant[] = {"U234",  "U235",  "U236",  "U238",  "Np237", "Pu238",
-                                     "Pu239", "Pu240", "Pu241", "Pu242", "Am241", "Am243",
-                                     "Xe135", "Cs137", "Nd148", "Sm149", "Gd157"};
-
-  int checked = 0;
+  // Compare EVERY nuclide the reference reports as present at end of life, the
+  // same set validation/report/ tabulates -- not a curated subset.
+  //
+  // A curated list used to stand here, justified as leaving out deep-chain
+  // trace actinides "sensitive to metastable/branching subtleties of the
+  // simplified chain". What it actually left out were the nuclides exposing two
+  // defects in the chain reader: fission yields delegated with
+  // <neutron_fission_yields parent="..."/>, and the target OpenMC names on an
+  // `sf` decay mode. Read correctly, all of them agree -- the trace actinides
+  // included, and by ten orders of margin -- so there is nothing to curate.
   const Eigen::VectorXd& ref = c.refDensity[static_cast<std::size_t>(c.steps)];
-  for (const char* name : kImportant) {
-    const std::optional<Zai> z = parseNuclideName(name);
-    if (!z)
-      continue;
-    const int i = c.chain.indexOf(*z);
-    if (i < 0 || ref(i) <= 0.0)
-      continue;
-    ++checked;
-    EXPECT_LT(std::abs(n(i) - ref(i)) / ref(i), 1e-3)
-        << name << ": cram=" << n(i) << " openmc=" << ref(i);
+  const auto name = [&](int i) {
+    const Zai& z = c.chain.nuclides()[static_cast<std::size_t>(i)];
+    return elementSymbol(z.z) + std::to_string(z.a) + (z.i != 0 ? "_m" + std::to_string(z.i) : "");
+  };
+
+  int compared = 0;
+  double worst = 0.0;
+  int worstIndex = -1;
+  for (int i = 0; i < ref.size(); ++i) {
+    if (!(ref(i) > 0.0))
+      continue;  // absent from the reference: no relative error to speak of
+    ++compared;
+    const double e = std::abs(n(i) - ref(i)) / ref(i);
+    if (e > worst) {
+      worst = e;
+      worstIndex = i;
+    }
+    EXPECT_LT(e, 1e-3) << name(i) << ": cram=" << n(i) << " openmc=" << ref(i);
   }
-  EXPECT_GE(checked, 12) << "too few benchmark nuclides present in the data";
+  EXPECT_GT(compared, 50) << "the reference reports too few nuclides to be the pin case";
+  RecordProperty("compared", compared);
+  std::ostringstream worstText;  // std::to_string would print 4e-13 as 0.000000
+  worstText << std::scientific << std::setprecision(3) << worst;
+  RecordProperty("worst_relative_error", worstText.str());
+  RecordProperty("worst_nuclide", worstIndex < 0 ? "none" : name(worstIndex));
+
+  // Every nuclide the benchmark reports must be among them: the comparison
+  // above skips a nuclide the reference does not carry, so without this a data
+  // file missing half the actinides would still pass it.
+  for (const char* wanted : cram_validation::kBenchmarkNuclides) {
+    const std::optional<Zai> z = parseNuclideName(wanted);
+    ASSERT_TRUE(z.has_value()) << wanted;
+    const int i = c.chain.indexOf(*z);
+    EXPECT_TRUE(i >= 0 && ref(i) > 0.0) << wanted << ": absent from the reference data";
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(Cases, VeraPin, ::testing::Values("vera_pin1a"));

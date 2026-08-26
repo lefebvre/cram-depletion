@@ -56,7 +56,11 @@ inline std::vector<std::string> splitCsv(const std::string& line) {
   return cols;
 }
 
-inline std::vector<std::vector<std::string>> readCsv(const fs::path& p) {
+// Rows of `p` with at least `columns` cells, header line skipped. A row with
+// fewer is dropped rather than indexed past the end: these files are generated,
+// but a truncated one is a plausible accident (an interrupted writer, a partial
+// copy) and every caller below reads fixed column positions out of the result.
+inline std::vector<std::vector<std::string>> readCsv(const fs::path& p, std::size_t columns) {
   std::vector<std::vector<std::string>> rows;
   std::ifstream in(p);
   std::string line;
@@ -68,7 +72,9 @@ inline std::vector<std::vector<std::string>> readCsv(const fs::path& p) {
       header = false;
       continue;
     }
-    rows.push_back(splitCsv(line));
+    std::vector<std::string> cells = splitCsv(line);
+    if (cells.size() >= columns)
+      rows.push_back(std::move(cells));
   }
   return rows;
 }
@@ -110,7 +116,7 @@ inline VeraCase loadVeraCase(const fs::path& root) {
     c.branches[{r.parent.key(), r.type}].push_back(r);
 
   // schedule.csv: step,dt_seconds,flux
-  for (const auto& row : readCsv(root / "schedule.csv")) {
+  for (const auto& row : readCsv(root / "schedule.csv", 3)) {
     c.dt.push_back(std::stod(row[1]));
     c.flux.push_back(std::stod(row[2]));
   }
@@ -120,7 +126,7 @@ inline VeraCase loadVeraCase(const fs::path& root) {
   // the nuclide are applied -- OpenMC ignores a tally the chain has no channel
   // for. reactionXs() splits a branched channel by branch fraction and carries
   // the fission Q through to constant-power normalization.
-  for (const auto& row : readCsv(root / "micro_xs.csv")) {
+  for (const auto& row : readCsv(root / "micro_xs.csv", 3)) {
     const std::optional<Zai> parent = parseNuclideName(row[0]);
     const std::optional<ReactionType> type = reactionTypeFromName(row[1]);
     if (!parent || !type)
@@ -135,7 +141,7 @@ inline VeraCase loadVeraCase(const fs::path& root) {
 
   // density.csv: step,nuclide,atoms  (step 0..N)
   c.refDensity.assign(static_cast<std::size_t>(c.steps) + 1, Eigen::VectorXd::Zero(c.chain.size()));
-  for (const auto& row : readCsv(root / "density.csv")) {
+  for (const auto& row : readCsv(root / "density.csv", 3)) {
     const int step = std::stoi(row[0]);
     const std::optional<Zai> z = parseNuclideName(row[1]);
     if (!z || step < 0 || step > c.steps)
@@ -189,7 +195,9 @@ inline constexpr const char* kBenchmarkNuclides[] = {
 // explain which nuclides the topology leaves under-determined.
 
 // Nuclides carrying a fission channel for which the chain holds no usable yield
-// table, so the fission products (and, today, the parent loss) are unavailable.
+// table, so the fission products are unavailable. The parent is still consumed
+// at the fission rate (see DepletionSystem::assemble); it is the products that
+// the topology cannot place.
 inline std::vector<cram::Zai> fissionWithoutYields(const VeraCase& c) {
   std::vector<cram::Zai> out;
   for (const auto& [key, brs] : c.branches) {

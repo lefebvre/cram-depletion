@@ -516,6 +516,8 @@ def render(d, fragment: bool = False) -> str:
             ("decay targets that did not parse", diag["unparsed_decay_targets"]),
             ("yield products that did not parse", diag["unparsed_yield_products"]),
             ("reactions of an unmodeled type", diag["unmodeled_reactions"]),
+            ("delegated yield tables that did not resolve", diag.get("unresolved_yield_delegations", 0)),
+            ("reaction targets that did not parse", diag.get("unparsed_reaction_targets", 0)),
         ))
 
     body = f"""<div class="wrap">
