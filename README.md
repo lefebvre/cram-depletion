@@ -118,8 +118,8 @@ The version lives in exactly one place — the `project()` call in the top-level
 | `deplete --version` | Prints `cram::kVersion` |
 | release tag | The `version-tag-check` CI job fails a `v*` tag that disagrees with `project()` |
 
-So cutting a release is: bump `project(cram_depletion VERSION ...)`, commit,
-then tag to match. Tagging without the bump fails CI rather than shipping a
+So cutting a release is: bump `project(cram_depletion VERSION ...)`, add the
+release to [CHANGELOG.md](CHANGELOG.md), commit, then tag to match. Tagging without the bump fails CI rather than shipping a
 binary whose `--version` contradicts its tag.
 
 ```cpp

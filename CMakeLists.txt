@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.28)
 # `deplete --version`. The release tag is checked against it by the version-check
 # CI job, so a `git tag v1.0.2` without the matching bump here fails rather than
 # shipping a binary that misreports itself.
-project(cram_depletion VERSION 2.0.0 LANGUAGES CXX)
+project(cram_depletion VERSION 2.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
