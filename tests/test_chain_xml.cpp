@@ -9,6 +9,7 @@
 
 #include "cram/chain.hpp"
 #include "cram/chain_xml.hpp"
+#include "cram/cram.hpp"
 #include "cram/deplete.hpp"
 
 using namespace cram;
@@ -133,7 +134,9 @@ TEST(ChainXml, LoadChain) {
   EXPECT_GE(chain.indexOf({54, 135, 0}), 0);  // Xe135
 
   // Decay data parsed: half-life, an alpha branch to Th231 carried as an
-  // explicit daughter, and an SF branch.
+  // explicit daughter, and an SF branch back to U235 itself -- the target
+  // OpenMC writes on an sf mode, honored like any other rather than routed to
+  // the yield tables.
   const DecayData* u235 = chain.decay({92, 235, 0});
   ASSERT_NE(u235, nullptr);
   EXPECT_NEAR(u235->halfLife, 2.22102e16, 1e9);
@@ -141,10 +144,11 @@ TEST(ChainXml, LoadChain) {
   ASSERT_TRUE(alpha.has_value());
   EXPECT_DOUBLE_EQ(alpha->branching, 0.99999999993);
   EXPECT_FALSE(alpha->isFission);
-  bool hasSf = false;
-  for (const auto& m : u235->modes)
-    hasSf |= m.isFission;
-  EXPECT_TRUE(hasSf);
+  const auto sf = modeTo(*u235, Zai{92, 235, 0});
+  ASSERT_TRUE(sf.has_value());
+  EXPECT_DOUBLE_EQ(sf->branching, 7.0e-11);
+  EXPECT_FALSE(sf->isFission);
+  EXPECT_EQ(u235->modes.size(), 2u);
 
   // Fission yields parsed for U235.
   const FissionYields* y = chain.nearestYields({92, 235, 0}, 0.0253);
@@ -310,4 +314,178 @@ TEST(ChainXml, ReactionXsCarriesQAndBranching) {
     sawMeta = true;
   }
   EXPECT_TRUE(sawMeta);
+}
+
+// OpenMC delegates the yields of a nuclide with no measured ones of its own to
+// another nuclide, <neutron_fission_yields parent="U235"/>, and does so for a
+// good fraction of the fissionable nuclides in a real chain. Read past, those
+// nuclides fission with no products and are never burned at all.
+TEST(ChainXml, DelegatedFissionYieldsAreResolved) {
+  const char* xml = R"XML(<depletion_chain>
+  <nuclide name="U235" half_life="2.22102e16" decay_modes="0" reactions="1">
+    <reaction type="fission" Q="193405400.0"/>
+    <neutron_fission_yields>
+      <energies>0.0253</energies>
+      <fission_yields energy="0.0253">
+        <products>Xe135 I135</products>
+        <data>0.00254 0.0292</data>
+      </fission_yields>
+    </neutron_fission_yields>
+  </nuclide>
+  <nuclide name="Np236" half_life="4.8e12" reactions="1">
+    <reaction type="fission" Q="190000000.0"/>
+    <neutron_fission_yields parent="U235"/>
+  </nuclide>
+  <nuclide name="Pu237" reactions="1">
+    <reaction type="fission" Q="190000000.0"/>
+    <neutron_fission_yields parent="Np236"/>
+  </nuclide>
+  <nuclide name="Th230" reactions="1">
+    <reaction type="fission" Q="180000000.0"/>
+    <neutron_fission_yields parent="Cf252"/>
+  </nuclide>
+  <nuclide name="Xe135"/>
+  <nuclide name="I135"/>
+</depletion_chain>)XML";
+
+  DepletionChain chain;
+  ChainXmlDiagnostics diag;
+  const auto reactions = loadDepletionChainXmlString(chain, xml, &diag);
+
+  const FissionYields* source = chain.nearestYields({92, 235, 0}, 0.0253);
+  ASSERT_NE(source, nullptr);
+  // Np236 delegates to U235; Pu237 delegates to Np236, which delegates on.
+  for (const Zai& z : {Zai{93, 236, 0}, Zai{94, 237, 0}}) {
+    const FissionYields* y = chain.nearestYields(z, 0.0253);
+    ASSERT_NE(y, nullptr) << z.str();
+    EXPECT_DOUBLE_EQ(y->energy, source->energy) << z.str();
+    ASSERT_EQ(y->products.size(), source->products.size()) << z.str();
+    for (std::size_t k = 0; k < y->products.size(); ++k) {
+      EXPECT_EQ(y->products[k].first, source->products[k].first) << z.str();
+      EXPECT_DOUBLE_EQ(y->products[k].second, source->products[k].second) << z.str();
+    }
+  }
+
+  // A delegation to a nuclide the file does not carry cannot be resolved, and
+  // is counted rather than leaving a silently yield-less nuclide behind.
+  EXPECT_EQ(chain.nearestYields({90, 230, 0}, 0.0253), nullptr);
+  EXPECT_EQ(diag.unresolvedYieldDelegations, 1);
+  EXPECT_FALSE(diag.clean());
+
+  // The delegated table is what the burnup matrix uses: Np236 fission produces
+  // the fission products, not nothing.
+  DepletionSystem sys(chain);
+  for (const auto& r : reactions) {
+    if (r.parent == Zai{93, 236, 0} && r.type == ReactionType::Fission)
+      sys.setReactions(r.parent, {reactionXs(r, 10.0)});
+  }
+  sys.setConstantFlux(1.0e14);
+  const Eigen::SparseMatrix<double> A = sys.assemble(Eigen::VectorXd::Zero(chain.size()));
+  const int np = chain.indexOf({93, 236, 0});
+  EXPECT_LT(A.coeff(np, np), 0.0);
+  EXPECT_GT(A.coeff(chain.indexOf({54, 135, 0}), np), 0.0);
+  EXPECT_GT(A.coeff(chain.indexOf({53, 135, 0}), np), 0.0);
+}
+
+// An OpenMC chain names the parent itself as the target of a spontaneous-
+// fission mode, so the branch removes and restores the same atoms. Reading it
+// as a fission mode instead removes the parent at branching*lambda and
+// substitutes the nearest NEUTRON-induced yield set for its products -- and
+// where the parent has no yield table at all, the atoms simply vanish, with
+// decayMatrix()'s dropped-daughter counter none the wiser.
+TEST(ChainXml, SpontaneousFissionSelfTargetLeavesTheParentAlone) {
+  const char* xml = R"XML(<depletion_chain>
+  <nuclide name="U232" half_life="2.17e9" decay_modes="1" reactions="0">
+    <decay type="sf" target="U232" branching_ratio="1.0"/>
+  </nuclide>
+</depletion_chain>)XML";
+
+  DepletionChain chain;
+  loadDepletionChainXmlString(chain, xml);
+  EXPECT_EQ(chain.close(), 0);
+  int dropped = -1;
+  const Eigen::SparseMatrix<double> M = chain.decayMatrix(&dropped);
+  EXPECT_EQ(dropped, 0);
+  const int i = chain.indexOf({92, 232, 0});
+  ASSERT_GE(i, 0);
+  EXPECT_DOUBLE_EQ(M.coeff(i, i), 0.0) << "removal and self-production cancel";
+
+  Eigen::VectorXd n0(chain.size());
+  n0.setZero();
+  n0(i) = 1.0;
+  EXPECT_NEAR(cramSolve(M, n0, 1.0e10)(i), 1.0, 1e-12) << "and nothing is lost over any span";
+}
+
+// OpenMC omits the target of a decay mode whenever the daughter falls outside
+// the chain, and spells an untracked reaction product "Nothing". Neither is an
+// entry the reader failed on, so neither may make clean() false: a caller that
+// passes no diagnostics pointer would get a warning about a perfectly good
+// file, and one that checks the counters would see a failure that is not there.
+TEST(ChainXml, AbsentDecayTargetIsNotAParseFailure) {
+  const char* xml = R"XML(<depletion_chain>
+  <nuclide name="Cm244" half_life="5.715e8" decay_modes="2" reactions="1">
+    <decay type="alpha" target="Pu240" branching_ratio="0.9999"/>
+    <decay type="beta-" branching_ratio="0.0001"/>
+    <reaction type="(n,gamma)" Q="6800000.0" target="Nothing"/>
+  </nuclide>
+  <nuclide name="Pu240"/>
+</depletion_chain>)XML";
+
+  DepletionChain chain;
+  ChainXmlDiagnostics diag;
+  loadDepletionChainXmlString(chain, xml, &diag);
+  EXPECT_EQ(diag.unparsedDecayTargets, 0);
+  EXPECT_EQ(diag.unparsedReactionTargets, 0);
+  EXPECT_TRUE(diag.clean());
+
+  // The targetless branch is dropped, but the parent still leaves at the full
+  // decay constant -- only its 0.01% of production is missing.
+  const DecayData* cm = chain.decay({96, 244, 0});
+  ASSERT_NE(cm, nullptr);
+  ASSERT_EQ(cm->modes.size(), 1u);
+  const Eigen::SparseMatrix<double> M = chain.decayMatrix();
+  const int i = chain.indexOf({96, 244, 0});
+  EXPECT_DOUBLE_EQ(M.coeff(i, i), -cm->decayConstant);
+  EXPECT_NEAR(M.coeff(chain.indexOf({94, 240, 0}), i), 0.9999 * cm->decayConstant,
+              1e-12 * cm->decayConstant);
+}
+
+// A reaction target the file names but never declares as its own <nuclide> is
+// registered anyway. Left out of the chain it is indistinguishable from the
+// deliberate "Nothing": assemble() consumes the parent and produces nothing,
+// and no counter, warning or close() notices -- the one hole in the reader's
+// promise that a dropped entry can never pass unnoticed. A target that cannot
+// be read at all is what the counter is for.
+TEST(ChainXml, ReactionTargetsAreRegisteredAndUnreadableOnesCounted) {
+  const char* xml = R"XML(<depletion_chain>
+  <nuclide name="Ag109" reactions="3">
+    <reaction type="(n,gamma)" Q="6809000.0" target="Ag110" branching_ratio="0.954"/>
+    <reaction type="(n,gamma)" Q="6809000.0" target="Ag110_m1" branching_ratio="0.046"/>
+    <reaction type="(n,2n)" Q="-9000000.0" target="Xx108"/>
+  </nuclide>
+</depletion_chain>)XML";
+
+  DepletionChain chain;
+  ChainXmlDiagnostics diag;
+  const auto reactions = loadDepletionChainXmlString(chain, xml, &diag);
+  EXPECT_GE(chain.indexOf({47, 110, 0}), 0);
+  EXPECT_GE(chain.indexOf({47, 110, 1}), 0);
+  EXPECT_EQ(chain.decay({47, 110, 0}), nullptr) << "registered bare, carrying no data";
+  EXPECT_EQ(diag.unparsedReactionTargets, 1);  // Xx108
+  EXPECT_FALSE(diag.clean());
+
+  DepletionSystem sys(chain);
+  for (const auto& r : reactions) {
+    if (r.type == ReactionType::NGamma)
+      sys.setReactions(r.parent, {reactionXs(r, 91.0)});
+  }
+  sys.setConstantFlux(1.0e14);
+  const Eigen::SparseMatrix<double> A = sys.assemble(Eigen::VectorXd::Zero(chain.size()));
+  const int ag = chain.indexOf({47, 109, 0});
+  // Whatever leaves Ag109 arrives at the metastable branch: nothing is lost.
+  double colSum = 0.0;
+  for (int r = 0; r < A.rows(); ++r)
+    colSum += A.coeff(r, ag);
+  EXPECT_NEAR(colSum, 0.0, 1e-20);
+  EXPECT_GT(A.coeff(chain.indexOf({47, 110, 1}), ag), 0.0);
 }

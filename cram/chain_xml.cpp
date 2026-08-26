@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 
 #ifdef CRAM_WITH_CHAIN_XML
@@ -102,19 +103,39 @@ void parseDecay(const pugi::xml_node& nuc, const Zai& parent, DepletionChain& ch
   for (pugi::xml_node dn : nuc.children("decay")) {
     const double branching = dn.attribute("branching_ratio").as_double(0.0);
     const std::string_view type = dn.attribute("type").as_string();
-    if (type == "sf") {
-      // Products from the fission-yield table, if present. rtyp 6.0 is the
-      // ENDF code for spontaneous fission; decayDaughter() never consults it
-      // for a fission mode, but it keeps the mode self-describing.
-      d.modes.push_back(
-          DecayMode{.rtyp = 6.0, .branching = branching, .finalState = 0, .isFission = true});
+    const std::string_view target = dn.attribute("target").as_string();
+
+    if (target.empty() || target == "Nothing") {
+      // OpenMC omits the target whenever the daughter falls outside the chain.
+      // The mode is not built and its branching is lost, but the matrix is
+      // still right: the parent is removed at the full decay constant either
+      // way, and nothing is produced. Not a parse failure -- parseReactions()
+      // reads the same two spellings the same way -- so it is not counted.
+      //
+      // A targetless "sf" is different: it is this library's own spelling for
+      // spontaneous fission with products from the SFY table (yields at energy
+      // 0). rtyp 6.0 is the ENDF code for it; decayDaughter() never consults
+      // rtyp for a fission mode, but it keeps the mode self-describing.
+      if (type == "sf")
+        d.modes.push_back(
+            DecayMode{.rtyp = 6.0, .branching = branching, .finalState = 0, .isFission = true});
       continue;
     }
-    const std::optional<Zai> daughter = parseNuclideName(dn.attribute("target").as_string());
+
+    const std::optional<Zai> daughter = parseNuclideName(target);
     if (!daughter) {
       ++diag.unparsedDecayTargets;  // mode dropped; its branching is lost
       continue;
     }
+    // Every named target routes its branch the same way, `sf` included: an
+    // OpenMC chain names the parent itself there, since the file does not
+    // track SF products as such, and its matrix carries that target like any
+    // other daughter, so the branch removes and restores the same atoms.
+    // Routing it to the yield tables instead would remove the parent at
+    // branching*lambda and substitute the nearest NEUTRON-induced yield set as
+    // the products -- and where the parent has no table at all, the atoms
+    // would simply vanish.
+    //
     // rtyp 0 is deliberate: the explicit daughter is what routes the branch,
     // and matrix assembly never derives one from rtyp when a daughter is set.
     d.modes.push_back(DecayMode{.rtyp = 0.0,
@@ -126,11 +147,11 @@ void parseDecay(const pugi::xml_node& nuc, const Zai& parent, DepletionChain& ch
   chain.setDecay(parent, std::move(d));
 }
 
-void parseFissionYields(const pugi::xml_node& nuc, const Zai& parent, DepletionChain& chain,
+// Store the tables of one <neutron_fission_yields> block on `parent`. The
+// block is not necessarily `parent`'s own: a delegating nuclide is given the
+// tables of the nuclide it delegates to (see resolveYieldDelegation()).
+void parseFissionYields(const pugi::xml_node& nfy, const Zai& parent, DepletionChain& chain,
                         ChainXmlDiagnostics& diag) {
-  pugi::xml_node nfy = nuc.child("neutron_fission_yields");
-  if (!nfy)
-    return;
   for (pugi::xml_node fy : nfy.children("fission_yields")) {
     FissionYields y{.energy = fy.attribute("energy").as_double(0.0)};
     const auto products = tokenize(fy.child("products").text().get());
@@ -148,8 +169,30 @@ void parseFissionYields(const pugi::xml_node& nuc, const Zai& parent, DepletionC
   }
 }
 
-void parseReactions(const pugi::xml_node& nuc, const Zai& parent, std::vector<ChainReaction>& out,
-                    ChainXmlDiagnostics& diag) {
+// The <neutron_fission_yields> block holding the actual tables for the nuclide
+// named `name`, following a chain of parent="..." delegations. Null when the
+// name is not in the file, when it has no yield block, or when the delegations
+// do not terminate (a cycle, or a longer chain than any real file has).
+pugi::xml_node resolveYieldDelegation(const std::unordered_map<std::string, pugi::xml_node>& byName,
+                                      std::string name) {
+  constexpr int kMaxHops = 8;
+  for (int hop = 0; hop < kMaxHops; ++hop) {
+    const auto it = byName.find(name);
+    if (it == byName.end())
+      return {};
+    pugi::xml_node nfy = it->second.child("neutron_fission_yields");
+    if (!nfy)
+      return {};
+    const std::string_view next = nfy.attribute("parent").as_string();
+    if (next.empty())
+      return nfy;  // the tables themselves
+    name = next;
+  }
+  return {};
+}
+
+void parseReactions(const pugi::xml_node& nuc, const Zai& parent, DepletionChain& chain,
+                    std::vector<ChainReaction>& out, ChainXmlDiagnostics& diag) {
   for (pugi::xml_node rn : nuc.children("reaction")) {
     const std::optional<ReactionType> type = reactionTypeFromName(rn.attribute("type").as_string());
     if (!type) {
@@ -158,13 +201,44 @@ void parseReactions(const pugi::xml_node& nuc, const Zai& parent, std::vector<Ch
     }
     const std::string_view target = rn.attribute("target").as_string();
     std::optional<Zai> product;
-    if (!target.empty() && target != "Nothing")
+    if (!target.empty() && target != "Nothing") {
       product = parseNuclideName(target);
+      if (product)
+        // Register it: a file may name a product it never declares as its own
+        // <nuclide> element, and an unregistered target is one assemble()
+        // consumes the parent for and produces nothing from -- the same
+        // treatment as a deliberate "Nothing", with nothing to tell them
+        // apart. This is what close() does for an unregistered decay daughter,
+        // and add() is idempotent, so a declared target costs a hash lookup.
+        chain.add(*product);
+      else
+        ++diag.unparsedReactionTargets;  // product lost; the parent is still consumed
+    }
     out.push_back(ChainReaction{.parent = parent,
                                 .type = *type,
                                 .target = product,
                                 .q = rn.attribute("Q").as_double(0.0),
                                 .branching = rn.attribute("branching_ratio").as_double(1.0)});
+  }
+}
+
+// Report on stderr what the reader could not use, one line per condition that
+// actually occurred. Only called when the caller passed no diagnostics pointer.
+void warnDiagnostics(const ChainXmlDiagnostics& diag, const std::string& what) {
+  if (diag.clean())
+    return;
+  const std::pair<int, const char*> counts[] = {
+      {diag.unparsedNuclides, "nuclide name(s) that did not parse (the whole element skipped)"},
+      {diag.unparsedDecayTargets, "decay target(s) that did not parse (the mode skipped)"},
+      {diag.unparsedYieldProducts, "fission-yield product(s) that did not parse"},
+      {diag.unmodeledReactions, "reaction(s) of a type this library does not model"},
+      {diag.unresolvedYieldDelegations, "delegated fission-yield table(s) that did not resolve"},
+      {diag.unparsedReactionTargets, "reaction target(s) that did not parse (the product lost)"},
+  };
+  std::fprintf(stderr, "cram: WARNING - %s: unusable entries dropped:\n", what.c_str());
+  for (const auto& [n, text] : counts) {
+    if (n > 0)
+      std::fprintf(stderr, "cram:   %d %s\n", n, text);
   }
 }
 
@@ -176,36 +250,55 @@ std::vector<ChainReaction> loadDocument(DepletionChain& chain, const pugi::xml_d
 
   ChainXmlDiagnostics diag;
 
-  // First pass: register every nuclide so decay/reaction targets resolve.
+  // First pass: register every nuclide so decay/reaction targets resolve, and
+  // index the elements by name so a yield delegation can find its source
+  // whether it appears before or after the nuclide that delegates to it.
+  std::unordered_map<std::string, pugi::xml_node> byName;
   for (pugi::xml_node nuc : root.children("nuclide")) {
-    if (const std::optional<Zai> z = parseNuclideName(nuc.attribute("name").as_string()))
+    const char* name = nuc.attribute("name").as_string();
+    if (const std::optional<Zai> z = parseNuclideName(name)) {
       chain.add(*z);
-    else
+      byName.emplace(name, nuc);
+    } else {
       ++diag.unparsedNuclides;
+    }
   }
 
   // Second pass: decay, fission yields, reaction topology.
   std::vector<ChainReaction> reactions;
+  std::vector<std::pair<Zai, std::string>> delegated;
   for (pugi::xml_node nuc : root.children("nuclide")) {
     const std::optional<Zai> z = parseNuclideName(nuc.attribute("name").as_string());
     if (!z)
       continue;  // already counted
     parseDecay(nuc, *z, chain, diag);
-    parseFissionYields(nuc, *z, chain, diag);
-    parseReactions(nuc, *z, reactions, diag);
+    if (pugi::xml_node nfy = nuc.child("neutron_fission_yields")) {
+      const std::string_view from = nfy.attribute("parent").as_string();
+      if (from.empty())
+        parseFissionYields(nfy, *z, chain, diag);
+      else
+        delegated.emplace_back(*z, std::string(from));  // resolved below
+    }
+    parseReactions(nuc, *z, chain, reactions, diag);
+  }
+
+  // Third pass: the delegating nuclides. Deferred to here because the nuclide
+  // whose tables they borrow may itself delegate, and may appear anywhere in
+  // the file.
+  for (const auto& [z, from] : delegated) {
+    pugi::xml_node nfy = resolveYieldDelegation(byName, from);
+    if (nfy)
+      parseFissionYields(nfy, z, chain, diag);
+    else
+      ++diag.unresolvedYieldDelegations;
   }
 
   // Reported through the out-parameter when the caller asked for it, and only
   // written to stderr otherwise -- the same convention as decayMatrix().
-  if (diagnostics != nullptr) {
+  if (diagnostics != nullptr)
     *diagnostics = diag;
-  } else if (!diag.clean()) {
-    std::fprintf(stderr,
-                 "cram: WARNING - %s: dropped %d nuclide(s), %d decay target(s), %d yield "
-                 "product(s) that did not parse and %d reaction(s) of unmodeled type.\n",
-                 what.c_str(), diag.unparsedNuclides, diag.unparsedDecayTargets,
-                 diag.unparsedYieldProducts, diag.unmodeledReactions);
-  }
+  else
+    warnDiagnostics(diag, what);
   return reactions;
 }
 
