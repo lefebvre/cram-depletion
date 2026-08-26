@@ -219,6 +219,8 @@ add_library(cram
   cram/cram_solver.cpp
   cram/burnup_matrix.cpp
   cram/reaction.cpp
+  cram/integrator.cpp
+  cram/deplete.cpp
   cram/endf_reader.cpp)
 # Headers are included as "cram/<name>.hpp", so the include root is the
 # directory *containing* cram/ -- the source root in the build tree, and the
@@ -431,6 +433,8 @@ if(CRAM_ENABLE_INSTALL)
     cram/chain.hpp
     cram/nuclide.hpp
     cram/reaction.hpp
+    cram/integrator.hpp
+    cram/deplete.hpp
     cram/endf_reader.hpp
     ${CRAM_GENERATED_INCLUDE_DIR}/cram/version.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cram)

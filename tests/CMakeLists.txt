@@ -4,7 +4,9 @@ add_executable(unit_tests
   test_reaction.cpp
   test_cram.cpp
   test_cram_solver.cpp
-  test_cram_golden.cpp)
+  test_cram_golden.cpp
+  test_integrator.cpp
+  test_deplete.cpp)
 
 target_include_directories(unit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
                                               ${CMAKE_SOURCE_DIR}/testing)
