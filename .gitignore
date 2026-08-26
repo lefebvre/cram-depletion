@@ -12,6 +12,11 @@ CMakeFiles/
 compile_commands.json
 *.cmake.stamp
 
+# Validation report output (the build tree copy is under build*/ already;
+# these catch a hand-run of the tools from the repo root)
+vera_report.json
+vera_validation_report.html
+
 # Coverage output
 coverage/
 *.gcda

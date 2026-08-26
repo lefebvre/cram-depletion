@@ -36,6 +36,7 @@
 #include "cram/integrator.hpp"
 #include "cram/nuclide.hpp"
 #include "cram/reaction.hpp"
+#include "validation/vera_case.hpp"
 
 #ifndef CRAM_VALIDATION_DATA_DIR
 #define CRAM_VALIDATION_DATA_DIR ""
@@ -46,54 +47,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-// Split one CSV line, honoring double-quoted fields (reaction names like
-// "(n,gamma)" contain commas). Quotes are stripped from the returned cells.
-std::vector<std::string> splitCsv(const std::string& line) {
-  std::vector<std::string> cols;
-  std::string cell;
-  bool inQuotes = false;
-  for (char ch : line) {
-    if (ch == '"') {
-      inQuotes = !inQuotes;
-    } else if (ch == ',' && !inQuotes) {
-      cols.push_back(cell);
-      cell.clear();
-    } else {
-      cell.push_back(ch);
-    }
-  }
-  cols.push_back(cell);
-  return cols;
-}
-
-std::vector<std::vector<std::string>> readCsv(const fs::path& p) {
-  std::vector<std::vector<std::string>> rows;
-  std::ifstream in(p);
-  std::string line;
-  bool header = true;
-  while (std::getline(in, line)) {
-    if (line.empty())
-      continue;
-    if (header) {  // skip the column-name row
-      header = false;
-      continue;
-    }
-    rows.push_back(splitCsv(line));
-  }
-  return rows;
-}
-
-// One depletion case loaded from a data directory.
-struct VeraCase {
-  DepletionChain chain;
-  // (parent, reaction) -> the chain's branch(es) for that reaction.
-  std::map<std::pair<std::int64_t, ReactionType>, std::vector<ChainReaction>> branches;
-  std::vector<double> dt;                                        // per step (s)
-  std::vector<double> flux;                                      // per step (n/cm^2/s)
-  std::unordered_map<Zai, std::vector<ReactionXS>, ZaiHash> xs;  // fixed over the trajectory
-  std::vector<Eigen::VectorXd> refDensity;                       // step 0..N
-  int steps = 0;
-};
+using cram_validation::VeraCase;
 
 }  // namespace
 
@@ -105,53 +59,14 @@ TEST_P(VeraPin, ReproducesOpenMCPredictorTrajectory) {
     GTEST_SKIP() << "no OpenMC reference data at " << root
                  << " (run validation/openmc/generate_vera_pin.py)";
 
-  VeraCase c;
-  ChainXmlDiagnostics diag;
-  auto topo = loadDepletionChainXml(c.chain, (root / "chain.xml").string(), &diag);
-  EXPECT_EQ(diag.unparsedNuclides, 0);
-  EXPECT_EQ(diag.unparsedDecayTargets, 0);
-  EXPECT_EQ(diag.unparsedYieldProducts, 0);
-  // A reaction absent from the chain for a nuclide must be ignored (OpenMC only
-  // applies reactions the chain defines), even if the micro-xs file carries a
-  // tally for it.
-  for (const auto& r : topo)
-    c.branches[{r.parent.key(), r.type}].push_back(r);
-
-  // schedule.csv: step,dt_seconds,flux
-  for (const auto& row : readCsv(root / "schedule.csv")) {
-    c.dt.push_back(std::stod(row[1]));
-    c.flux.push_back(std::stod(row[2]));
-  }
-  c.steps = static_cast<int>(c.dt.size());
+  const VeraCase c = cram_validation::loadVeraCase(root);
+  EXPECT_EQ(c.diagnostics.unparsedNuclides, 0);
+  EXPECT_EQ(c.diagnostics.unparsedDecayTargets, 0);
+  EXPECT_EQ(c.diagnostics.unparsedYieldProducts, 0);
+  // A reaction absent from the chain for a nuclide is ignored by the loader
+  // (OpenMC only applies reactions the chain defines), even if the micro-xs file
+  // carries a tally for it.
   ASSERT_GT(c.steps, 0);
-
-  // micro_xs.csv: nuclide,reaction,xs_barn  (fixed over the trajectory). Only
-  // reactions the chain defines for the nuclide are applied; reactionXs()
-  // splits a branched (n,gamma) by branch fraction and carries the fission Q.
-  for (const auto& row : readCsv(root / "micro_xs.csv")) {
-    const std::optional<Zai> parent = parseNuclideName(row[0]);
-    const std::optional<ReactionType> type = reactionTypeFromName(row[1]);
-    if (!parent || !type)
-      continue;
-    auto it = c.branches.find({parent->key(), *type});
-    if (it == c.branches.end())
-      continue;  // reaction not in the chain for this nuclide -> ignore the tally
-    const double sigma = std::stod(row[2]);
-    for (const ChainReaction& br : it->second)
-      c.xs[*parent].push_back(reactionXs(br, sigma));
-  }
-
-  // density.csv: step,nuclide,atoms  (step 0..N)
-  c.refDensity.assign(static_cast<std::size_t>(c.steps) + 1, Eigen::VectorXd::Zero(c.chain.size()));
-  for (const auto& row : readCsv(root / "density.csv")) {
-    const int step = std::stoi(row[0]);
-    const std::optional<Zai> z = parseNuclideName(row[1]);
-    if (!z || step < 0 || step > c.steps)
-      continue;
-    const int idx = c.chain.indexOf(*z);
-    if (idx >= 0)
-      c.refDensity[static_cast<std::size_t>(step)](idx) = std::stod(row[2]);
-  }
 
   // Build the system once from the fixed cross sections, then march the
   // predictor step by step, re-normalizing only the flux each step.
