@@ -23,7 +23,7 @@ cram/burnup_matrix.cpp   matrix assembly (decay, fission source, reactions)
 cram/reaction.hpp        neutron reaction channels, products, OpenMC reaction names
 cram/integrator.hpp      time integrators (predictor, CE/CM, CE/LI, LE/QI, CF4)
 cram/deplete.hpp         DepletionSystem: fixed one-group XS, constant flux or power
-cram/adjoint.hpp         adjoint (importance) solves for linear systems
+cram/adjoint.hpp         adjoint solves, sensitivities, source/integrated generators
 cram/chain_xml.cpp       OpenMC depletion_chain XML reader (optional, pugixml)
 cram/endf_reader.cpp     ENDFtk ingestion (optional, see notes)
 cram-apps/deplete.cpp    runnable demo + ENDF driver
@@ -204,11 +204,33 @@ tests/test_reaction.cpp  reaction products and OpenMC reaction names
 tests/test_integrator.cpp order-of-accuracy study; exactness under constant flux
 tests/test_deplete.cpp   DepletionSystem: normalization, validation, trajectories
 tests/test_adjoint.cpp   duality identity, analytic importance, piecewise marches
+tests/test_sensitivity.cpp finite-difference checks of dR/dlambda and dR/dsigma
 tests/test_chain_xml.cpp OpenMC chain reader (CRAM_WITH_CHAIN_XML only)
 tests/validation/        replay of OpenMC-generated VERA pin data (CRAM_WITH_CHAIN_XML only)
 tests/integration/       real ENDFtk reader vs real ENDF data (WITH_ENDFTK only)
 testing/depletion_pin_fixture.hpp  hand-built thermal-pin chain + one-group XS
 ```
+
+## Adjoint and sensitivities
+
+For a system whose matrix does not depend on the composition -- decay only,
+constant flux, or a piecewise-constant flux schedule -- `cram/adjoint.hpp`
+solves the adjoint equation `dn*/dt = -Aᵀ n*` backward from a response weight
+`w`. Because `exp(Aᵀ dt) = exp(A dt)ᵀ` this is the same CRAM solve on the
+transposed matrix, and `n*(0)` is `dR/dn0` for every initial density at once.
+A time-integrated response `∫ w·n dt` uses the inhomogeneous generator
+`[[Aᵀ, w], [0, 0]]` so the source enters a plain matrix exponential; the same
+generator solves `dn/dt = A n + s` for a constant feed or removal.
+
+First-order sensitivities to the matrix entries, `dR/dA_ij = ∫ n*_i n_j dt`,
+are a product of two trajectories and so are integrated by Gauss–Legendre
+quadrature over the exact solves (`rateSensitivities`; raise
+`SensitivityOptions::subIntervals` until the result stops moving when a short
+half-life sits inside a long interval). `decayConstantSensitivities` and
+`reactionSensitivities` contract them to `dR/dλ` per nuclide and `dR/dσ` per
+channel. Constant-power normalization makes `A` depend on `n` through the
+flux; its adjoint is not implemented and `intervalMatrices` refuses such a
+system rather than freezing the flux silently.
 
 ## Validation against OpenMC (VERA depletion benchmark)
 

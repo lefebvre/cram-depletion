@@ -139,6 +139,15 @@ public:
   // Build a sparse matrix from accumulated triplets (sums duplicates).
   Eigen::SparseMatrix<double> finalize(std::vector<Eigen::Triplet<double>> triplets) const;
 
+  // The single tracked product of a decay mode: the explicit `daughter` when
+  // one was supplied, otherwise the nuclide applyDecay() derives from the RTYP
+  // sequence. Empty when the mode is (or encodes) fission, whose products come
+  // from the yield tables instead. Shared by close() and decayTriplets() so the
+  // daughters registered by the one are exactly the daughters produced by the
+  // other, and public so a caller contracting over the decay topology (the
+  // sensitivity code does) sees the same product the matrix does.
+  static std::optional<Zai> decayDaughter(const Zai& parent, const DecayMode& m);
+
 private:
   // A yield set together with its products already resolved to matrix indices.
   //
@@ -169,14 +178,6 @@ private:
   void decayTriplets(std::vector<Eigen::Triplet<double>>& t, int& dropped) const;
 
   static void warnDroppedDaughters(int dropped);
-
-  // The single tracked product of a decay mode: the explicit `daughter` when
-  // one was supplied, otherwise the nuclide applyDecay() derives from the RTYP
-  // sequence. Empty when the mode is (or encodes) fission, whose products come
-  // from the yield tables instead. Shared by close() and decayTriplets() so the
-  // daughters registered by the one are exactly the daughters produced by the
-  // other.
-  static std::optional<Zai> decayDaughter(const Zai& parent, const DecayMode& m);
 
   const YieldEntry* nearestEntry(const Zai& parent, double energy) const;
 
