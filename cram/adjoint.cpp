@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 #include "cram/cram_solver.hpp"
@@ -69,10 +70,19 @@ void requireSchedule(const std::vector<Eigen::SparseMatrix<double>>& A,
 
 // exp(G dt) applied to (v; 1) for G = sourceGenerator(M, s): the first N
 // entries of the result are exp(M dt) v + integral_0^dt exp(M u) s du.
-Eigen::VectorXd stepWithSource(CramSolver& solver, const Eigen::SparseMatrix<double>& M,
-                               const Eigen::VectorXd& s, const Eigen::VectorXd& v, double dt) {
-  const Eigen::Index N = M.rows();
-  solver.prepare(sourceGenerator(M, s), dt);
+// One step of an inhomogeneous problem through an ALREADY BUILT (N+1)x(N+1)
+// generator G = sourceGenerator(M, s): exp(G dt) applied to (v; 1), with the
+// trailing 1 dropped.
+//
+// G is a parameter rather than built here because only `dt` varies across the
+// calls that matter. rateSensitivities() steps from one interval's generator to
+// every quadrature node in it -- 80 of them at the default rule, 200 at the
+// settings the tests use -- and building it per node copied the whole triplet
+// list of A each time for a matrix that never changed.
+Eigen::VectorXd stepWithSource(CramSolver& solver, const Eigen::SparseMatrix<double>& G,
+                               const Eigen::VectorXd& v, double dt) {
+  const Eigen::Index N = G.rows() - 1;
+  solver.prepare(G, dt);
   Eigen::VectorXd x(N + 1);
   x.head(N) = v;
   x(N) = 1.0;
@@ -160,9 +170,67 @@ AdjointResult adjointDepleteIntegrated(const std::vector<Eigen::SparseMatrix<dou
   // which is one solve on the source generator of (A_k^T, w).
   CramSolver solver(order);
   for (std::size_t k = K; k-- > 0;)
-    r.nStar[k] = stepWithSource(solver, transposed(A[k]), w, r.nStar[k + 1], dts[k]);
+    r.nStar[k] =
+        stepWithSource(solver, sourceGenerator(transposed(A[k]), w), r.nStar[k + 1], dts[k]);
   return r;
 }
+
+namespace {
+
+// Every entry of A that some channel of `system` can move, as explicit zeros:
+// the parent diagonal, a tracked target, and each product of the yield table a
+// fission channel would use.
+//
+// assemble() emits nothing at all for a channel whose rate is zero -- a cross
+// section of zero, or a zero-flux interval -- so those entries would be absent
+// from the sparsity pattern, and rateSensitivities() integrates only the
+// pattern. An absent entry and a zero one are the same to coeff() but mean
+// opposite things: an integral that came out zero, versus one that was never
+// taken. Carrying the structure keeps the two apart, at the price of a handful
+// of stored zeros in a matrix whose values are unchanged.
+std::vector<Eigen::Triplet<double>> channelPattern(const DepletionSystem& system) {
+  const DepletionChain& chain = system.chain();
+  std::vector<Eigen::Triplet<double>> t;
+  for (const auto& [parent, rxns] : system.reactions()) {
+    const int p = chain.indexOf(parent);
+    if (p < 0)
+      continue;
+    for (const ReactionXS& r : rxns) {
+      t.emplace_back(p, p, 0.0);  // removal of the parent
+      if (r.type == ReactionType::Fission) {
+        if (const FissionYields* y = chain.nearestYields(parent, r.energy)) {
+          for (const auto& [product, yield] : y->products) {
+            const int j = chain.indexOf(product);
+            if (j >= 0)
+              t.emplace_back(j, p, 0.0);
+          }
+        }
+      } else if (r.target) {
+        const int j = chain.indexOf(*r.target);
+        if (j >= 0)
+          t.emplace_back(j, p, 0.0);
+      }
+    }
+  }
+  return t;
+}
+
+// A with `extra` merged into its structure. setFromTriplets() sums duplicates
+// and stores what it is given, zero or not, so the values are exactly A's.
+Eigen::SparseMatrix<double> withPattern(const Eigen::SparseMatrix<double>& A,
+                                        const std::vector<Eigen::Triplet<double>>& extra) {
+  std::vector<Eigen::Triplet<double>> t = extra;
+  t.reserve(extra.size() + static_cast<std::size_t>(A.nonZeros()));
+  for (Eigen::Index k = 0; k < A.outerSize(); ++k)
+    for (Eigen::SparseMatrix<double>::InnerIterator it(A, k); it; ++it)
+      t.emplace_back(it.row(), it.col(), it.value());
+  Eigen::SparseMatrix<double> out(A.rows(), A.cols());
+  out.setFromTriplets(t.begin(), t.end());
+  out.makeCompressed();
+  return out;
+}
+
+}  // namespace
 
 std::vector<Eigen::SparseMatrix<double>> intervalMatrices(DepletionSystem& system,
                                                           const std::vector<double>& flux) {
@@ -175,9 +243,10 @@ std::vector<Eigen::SparseMatrix<double>> intervalMatrices(DepletionSystem& syste
   // The composition is irrelevant under constant flux; any vector of the right
   // size will do.
   const Eigen::VectorXd any = Eigen::VectorXd::Zero(system.chain().size());
+  const std::vector<Eigen::Triplet<double>> channels = channelPattern(system);
   for (double phi : flux) {
     system.setConstantFlux(phi);
-    A.push_back(system.assemble(any));
+    A.push_back(withPattern(system.assemble(any), channels));
   }
   return A;
 }
@@ -252,7 +321,10 @@ std::vector<std::pair<double, double>> quadraturePieces(double dt, int sub, int 
 }
 
 // The union of the sparsity patterns, as a matrix of zeros with that structure.
+// Empty in, empty out: an empty schedule has no dimension to report.
 Eigen::SparseMatrix<double> patternUnion(const std::vector<Eigen::SparseMatrix<double>>& A) {
+  if (A.empty())
+    return {};
   std::vector<Eigen::Triplet<double>> t;
   for (const auto& M : A)
     for (Eigen::Index k = 0; k < M.outerSize(); ++k)
@@ -279,6 +351,11 @@ std::vector<Eigen::SparseMatrix<double>> rateSensitivities(
   if (options.endRefinements < 0 || options.endRefinements > 30)
     throw std::invalid_argument("cram: SensitivityOptions::endRefinements must be 0..30");
   const GaussRule rule = gaussLegendre(options.gaussPoints);
+  // An empty schedule is a valid one everywhere else here -- depleteLinear()
+  // and adjointDeplete() return their single initial point for it -- so it
+  // returns no interval matrices rather than reaching for A.front() below.
+  if (dts.empty())
+    return {};
   const Eigen::SparseMatrix<double> pattern = patternUnion(A);
 
   std::vector<Eigen::SparseMatrix<double>> S;
@@ -288,6 +365,10 @@ std::vector<Eigen::SparseMatrix<double>> rateSensitivities(
   for (std::size_t k = 0; k < dts.size(); ++k) {
     Eigen::SparseMatrix<double> Sk = pattern;  // zeros with the union structure
     const Eigen::SparseMatrix<double> At = transposed(A[k]);
+    // Depends only on the interval, so it is built here and not at every node.
+    const Eigen::SparseMatrix<double> source = adj.integratedWeight
+                                                   ? sourceGenerator(At, *adj.integratedWeight)
+                                                   : Eigen::SparseMatrix<double>();
     for (const auto& [a, b] :
          quadraturePieces(dts[k], options.subIntervals, options.endRefinements)) {
       const double h = b - a;
@@ -299,7 +380,7 @@ std::vector<Eigen::SparseMatrix<double>> rateSensitivities(
         const Eigen::VectorXd n = forward.apply(fwd.n[k]);
         Eigen::VectorXd nStar;
         if (adj.integratedWeight) {
-          nStar = stepWithSource(backward, At, *adj.integratedWeight, adj.nStar[k + 1], rest);
+          nStar = stepWithSource(backward, source, adj.nStar[k + 1], rest);
         } else {
           backward.prepare(At, rest);
           nStar = backward.apply(adj.nStar[k + 1]);
@@ -349,6 +430,37 @@ Eigen::VectorXd decayConstantSensitivities(const DepletionChain& chain,
   return out;
 }
 
+namespace {
+
+// dA(row, p) / dsigma for every row one reaction channel of `parent` (at
+// matrix index p) touches: -1 for the parent's removal, +1 at a tracked
+// target, +yield at each product of the yield table the channel would use.
+//
+// Accumulated into one map rather than applied term by term so that a product
+// which is also the parent nets against the removal instead of replacing it,
+// and so the contraction below can be a single walk of one column.
+std::unordered_map<int, double> channelGain(const DepletionChain& chain, const Zai& parent, int p,
+                                            const ReactionXS& r) {
+  std::unordered_map<int, double> gain;
+  gain[p] -= 1.0;
+  if (r.type == ReactionType::Fission) {
+    if (const FissionYields* y = chain.nearestYields(parent, r.energy)) {
+      for (const auto& [product, yield] : y->products) {
+        const int j = chain.indexOf(product);
+        if (j >= 0)
+          gain[j] += yield;
+      }
+    }
+  } else if (r.target) {
+    const int j = chain.indexOf(*r.target);
+    if (j >= 0)
+      gain[j] += 1.0;
+  }
+  return gain;
+}
+
+}  // namespace
+
 std::vector<ReactionSensitivity> reactionSensitivities(
     const DepletionSystem& system, const std::vector<Eigen::SparseMatrix<double>>& S,
     const std::vector<double>& flux) {
@@ -356,6 +468,11 @@ std::vector<ReactionSensitivity> reactionSensitivities(
     throw std::invalid_argument("cram: reactionSensitivities needs one flux per S_k");
   constexpr double kBarn = 1e-24;
   const DepletionChain& chain = system.chain();
+  for (const auto& Sk : S) {
+    if (Sk.rows() != chain.size() || Sk.cols() != chain.size())
+      throw std::invalid_argument(
+          "cram: reactionSensitivities needs each S_k sized like the system's chain");
+  }
 
   std::vector<ReactionSensitivity> out;
   for (const auto& [parent, rxns] : system.reactions()) {
@@ -363,17 +480,30 @@ std::vector<ReactionSensitivity> reactionSensitivities(
     for (const ReactionXS& r : rxns) {
       double s = 0.0;
       if (p >= 0) {
+        const std::unordered_map<int, double> gain = channelGain(chain, parent, p, r);
         for (std::size_t k = 0; k < S.size(); ++k) {
-          double dA = -S[k].coeff(p, p);
-          if (r.type == ReactionType::Fission) {
-            if (const FissionYields* y = chain.nearestYields(parent, r.energy))
-              for (const auto& [product, yield] : y->products)
-                dA += yield * S[k].coeff(chain.indexOf(product), p);
-          } else if (r.target) {
-            const int j = chain.indexOf(*r.target);
-            if (j >= 0)
-              dA += S[k].coeff(j, p);
+          // Walk column p once and pick out the rows this channel moves.
+          // Reading them with coeff() instead would report 0 for an entry S_k
+          // never integrated -- indistinguishable from one that integrated to
+          // zero -- and, since the removal term is applied either way, would
+          // hand back half a derivative with no sign left to trust.
+          double dA = 0.0;
+          std::size_t found = 0;
+          for (Eigen::SparseMatrix<double>::InnerIterator it(S[k], p); it; ++it) {
+            const auto g = gain.find(static_cast<int>(it.row()));
+            if (g == gain.end())
+              continue;
+            dA += g->second * it.value();
+            ++found;
           }
+          if (found != gain.size())
+            throw std::invalid_argument(
+                "cram: reactionSensitivities: S has no entry for part of the " +
+                std::string(reactionName(r.type)) + " channel of " + parent.str() +
+                ", so its derivative would be incomplete. S_k carries only the sparsity of "
+                "the matrices it was built from, and a channel with no rate on any interval "
+                "contributes none; build the interval matrices with intervalMatrices(), which "
+                "keeps a structural entry for every channel of the system");
           s += flux[k] * kBarn * dA;
         }
       }
