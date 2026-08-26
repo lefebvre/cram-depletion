@@ -1,5 +1,6 @@
 #include "cram/adjoint.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <stdexcept>
@@ -468,11 +469,13 @@ std::vector<ReactionSensitivity> reactionSensitivities(
     throw std::invalid_argument("cram: reactionSensitivities needs one flux per S_k");
   constexpr double kBarn = 1e-24;
   const DepletionChain& chain = system.chain();
-  for (const auto& Sk : S) {
-    if (Sk.rows() != chain.size() || Sk.cols() != chain.size())
-      throw std::invalid_argument(
-          "cram: reactionSensitivities needs each S_k sized like the system's chain");
-  }
+  const bool wrongSize =
+      std::any_of(S.begin(), S.end(), [&chain](const Eigen::SparseMatrix<double>& Sk) {
+        return Sk.rows() != chain.size() || Sk.cols() != chain.size();
+      });
+  if (wrongSize)
+    throw std::invalid_argument(
+        "cram: reactionSensitivities needs each S_k sized like the system's chain");
 
   std::vector<ReactionSensitivity> out;
   for (const auto& [parent, rxns] : system.reactions()) {

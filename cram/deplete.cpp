@@ -1,6 +1,8 @@
 #include "cram/deplete.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <stdexcept>
 #include <utility>
 
@@ -28,18 +30,19 @@ void DepletionSystem::refreshChain() {
 }
 
 void DepletionSystem::requireFissionQ(const std::vector<ReactionXS>& reactions) {
-  for (const auto& r : reactions) {
-    if (r.type == ReactionType::Fission && !(r.q > 0.0))
-      throw std::invalid_argument(
-          "cram: a fission channel needs q > 0 under constant-power normalization");
-  }
+  const bool missingQ = std::any_of(reactions.begin(), reactions.end(), [](const ReactionXS& r) {
+    return r.type == ReactionType::Fission && !(r.q > 0.0);
+  });
+  if (missingQ)
+    throw std::invalid_argument(
+        "cram: a fission channel needs q > 0 under constant-power normalization");
 }
 
 void DepletionSystem::setReactions(const Zai& parent, std::vector<ReactionXS> reactions) {
-  for (const auto& r : reactions) {
-    if (r.sigma < 0.0)
-      throw std::invalid_argument("cram: negative cross section for " + parent.str());
-  }
+  const bool negativeSigma = std::any_of(reactions.begin(), reactions.end(),
+                                         [](const ReactionXS& r) { return r.sigma < 0.0; });
+  if (negativeSigma)
+    throw std::invalid_argument("cram: negative cross section for " + parent.str());
   if (norm_ == Normalization::ConstantPower && power_ != 0.0)
     requireFissionQ(reactions);
   for (auto& [p, rxns] : reactions_) {
@@ -75,10 +78,13 @@ double DepletionSystem::fissionPowerWeight(const Eigen::VectorXd& n) const {
     int pi = chain_.indexOf(parent);
     if (pi < 0)
       continue;
-    for (const auto& r : rxns) {
-      if (r.type == ReactionType::Fission)
-        w += n(pi) * r.sigma * kBarn * r.q * kEvToJoule;
-    }
+    // w is the init value, so the terms are summed in the same order a running
+    // total would have visited them and the last bits do not move.
+    w = std::accumulate(rxns.begin(), rxns.end(), w, [&](double acc, const ReactionXS& r) {
+      if (r.type != ReactionType::Fission)
+        return acc;
+      return acc + n(pi) * r.sigma * kBarn * r.q * kEvToJoule;
+    });
   }
   return w;
 }
@@ -150,8 +156,8 @@ Eigen::SparseMatrix<double> DepletionSystem::assemble(const Eigen::VectorXd& n) 
       }
     }
   }
-  Eigen::SparseMatrix<double> reactions = chain_.finalize(std::move(t));
-  return decay_ + reactions;
+  Eigen::SparseMatrix<double> reactionMatrix = chain_.finalize(std::move(t));
+  return decay_ + reactionMatrix;
 }
 
 MatrixBuilder DepletionSystem::matrixBuilder() const {
