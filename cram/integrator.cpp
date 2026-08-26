@@ -35,21 +35,12 @@ public:
 
 // CE/LI CFQ4 predictor-corrector (OpenMC CELIIntegrator). Predictor is constant
 // extrapolation; corrector is the two-exponential commutator-free linear form.
-// Application order follows the OpenMC source: f1-combination first, then f2.
-//   n^p     = exp(dt * A(n_i)) n_i
-//   n_inter = exp(dt * (5/12 A(n_i) + 1/12 A(n^p))) n_i
-//   n_{i+1} = exp(dt * (1/12 A(n_i) + 5/12 A(n^p))) n_inter
+// The scheme itself is Integrator::celiStep(), which LE/QI's first step shares.
 class CELIIntegrator final : public Integrator {
 public:
   using Integrator::Integrator;
   Eigen::VectorXd step(const Eigen::VectorXd& n, double dt) override {
-    SpMat A0 = build_(n);
-    Eigen::VectorXd nCe = expm(A0, dt, n);  // predictor
-    SpMat A1 = build_(nCe);
-    SpMat f1 = (5.0 / 12.0) * A0 + (1.0 / 12.0) * A1;
-    Eigen::VectorXd nInter = expm(f1, dt, n);
-    SpMat f2 = (1.0 / 12.0) * A0 + (5.0 / 12.0) * A1;
-    return expm(f2, dt, nInter);
+    return celiStep(build_(n), n, dt);
   }
 };
 
@@ -86,14 +77,20 @@ public:
   void reset() override { hasPrev_ = false; }
 
   Eigen::VectorXd step(const Eigen::VectorXd& n, double dt) override {
+    // A zero-length interval is the identity for every other scheme (expm()
+    // returns v unchanged for dt == 0). Return before the history is written: dt is the
+    // divisor of every coefficient of the NEXT step, so recording a zero here
+    // would turn the following interval into non-finite matrices rather than
+    // just doing nothing on this one. The previous interval stays the
+    // extrapolation baseline, which is what a step of no duration implies.
+    if (dt == 0.0)
+      return n;
+
     SpMat A0 = build_(n);  // A(n_i)
 
     if (!hasPrev_) {
       // CE/LI bootstrap, but remember this step's BOS matrix for the next one.
-      Eigen::VectorXd nCe = expm(A0, dt, n);
-      SpMat A1 = build_(nCe);
-      Eigen::VectorXd nInter = expm((5.0 / 12.0) * A0 + (1.0 / 12.0) * A1, dt, n);
-      Eigen::VectorXd nEnd = expm((1.0 / 12.0) * A0 + (5.0 / 12.0) * A1, dt, nInter);
+      Eigen::VectorXd nEnd = celiStep(A0, n, dt);
       prevA0_ = A0;
       prevDt_ = dt;
       hasPrev_ = true;
@@ -132,6 +129,18 @@ private:
 };
 
 }  // namespace
+
+// Application order follows the OpenMC source: the f1 combination first, then
+// f2 applied to its result.
+Eigen::VectorXd Integrator::celiStep(const Eigen::SparseMatrix<double>& A0,
+                                     const Eigen::VectorXd& n, double dt) {
+  const Eigen::VectorXd nCe = expm(A0, dt, n);  // predictor: constant extrapolation
+  const SpMat A1 = build_(nCe);
+  const SpMat f1 = (5.0 / 12.0) * A0 + (1.0 / 12.0) * A1;
+  const Eigen::VectorXd nInter = expm(f1, dt, n);
+  const SpMat f2 = (1.0 / 12.0) * A0 + (5.0 / 12.0) * A1;
+  return expm(f2, dt, nInter);
+}
 
 std::unique_ptr<Integrator> makeIntegrator(IntegratorKind kind, MatrixBuilder build,
                                            CramOrder order) {

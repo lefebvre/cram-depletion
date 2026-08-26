@@ -135,6 +135,30 @@ TEST(Integrator, ConvergenceOrderMatchesScheme) {
   EXPECT_LT(eCeli[2] * 50.0, ePred[2]) << "celi vs predictor";
   EXPECT_LT(eLeqi[2] * 50.0, ePred[2]) << "leqi vs predictor";
   EXPECT_LT(eCf4[2], eCecm[2]) << "cf4 most accurate";
+
+  // Every schedule above is uniform, and LE/QI's coefficients are functions of
+  // dt/dtl that reduce to CE/LI's at a ratio of 1 -- the whole reason the
+  // scheme is more than a copy of CE/LI goes unexercised past its first step.
+  // Refine a repeating [h, 4h] schedule instead: same total time, same
+  // reference, and the ratio alternates 4 and 1/4 at every step.
+  const auto pairedSchedule = [&](int pairs) {
+    const double h = T / (5.0 * pairs);
+    std::vector<double> dts;
+    dts.reserve(static_cast<std::size_t>(2 * pairs));
+    for (int k = 0; k < pairs; ++k) {
+      dts.push_back(h);
+      dts.push_back(4.0 * h);
+    }
+    return dts;
+  };
+  std::vector<double> eLeqiGraded;
+  for (int s : stepCounts) {  // same step counts, paired [h, 4h]
+    auto integ = makeIntegrator(IntegratorKind::LEQI, psys.matrixBuilder());
+    const double x = deplete(*integ, n0, pairedSchedule(s / 2)).n.back()(iU235);
+    eLeqiGraded.push_back(std::abs(x - truth) / std::abs(truth));
+  }
+  EXPECT_GT(order(eLeqiGraded[1], eLeqiGraded[2]), 1.7) << "leqi, non-uniform steps";
+  EXPECT_LT(eLeqiGraded[2] * 50.0, ePred[2]) << "leqi non-uniform vs predictor";
 }
 
 TEST(Integrator, NameRoundTrip) {
@@ -143,4 +167,29 @@ TEST(Integrator, NameRoundTrip) {
   EXPECT_EQ(integratorKindFromName("CE/CM"), IntegratorKind::CECM);
   EXPECT_EQ(integratorKindFromName("LE-QI"), IntegratorKind::LEQI);
   EXPECT_THROW(integratorKindFromName("bogus"), std::invalid_argument);
+}
+
+// A zero-length interval is the identity: cramSolve returns n for dt == 0, so
+// every scheme must come out where it went in and the march must agree with
+// the same schedule with that interval left out. LE/QI divides the next step's
+// coefficients by the previous interval length, so a zero recorded as history
+// makes every following step non-finite.
+TEST(Integrator, ZeroLengthIntervalIsTheIdentity) {
+  DepletionChain chain = buildPinChain();
+  DepletionSystem sys(chain);
+  configurePinReactions(sys);
+  const Eigen::VectorXd n0 = initialPinComposition(chain);
+  sys.setConstantFlux(1.0e14);
+  sys.setConstantPower(sys.powerFor(n0));  // composition-dependent A
+
+  const std::vector<double> withZero = {10.0 * kDay, 0.0, 30.0 * kDay, 0.0};
+  const std::vector<double> without = {10.0 * kDay, 30.0 * kDay};
+  for (IntegratorKind kind : kAllKinds) {
+    auto a = makeIntegrator(kind, sys.matrixBuilder());
+    auto b = makeIntegrator(kind, sys.matrixBuilder());
+    const Eigen::VectorXd x = deplete(*a, n0, withZero).n.back();
+    const Eigen::VectorXd y = deplete(*b, n0, without).n.back();
+    ASSERT_TRUE(x.allFinite()) << integratorName(kind);
+    EXPECT_LT((x - y).norm(), 1e-12 * y.norm()) << integratorName(kind);
+  }
 }
