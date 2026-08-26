@@ -348,6 +348,8 @@ int main(int argc, char** argv) {
   j.member("unparsed_decay_targets", c.diagnostics.unparsedDecayTargets);
   j.member("unparsed_yield_products", c.diagnostics.unparsedYieldProducts);
   j.member("unmodeled_reactions", c.diagnostics.unmodeledReactions);
+  j.member("unresolved_yield_delegations", c.diagnostics.unresolvedYieldDelegations);
+  j.member("unparsed_reaction_targets", c.diagnostics.unparsedReactionTargets);
   j.member("clean", c.diagnostics.clean());
   j.endObject();
   j.beginArray("fission_without_yield_table");

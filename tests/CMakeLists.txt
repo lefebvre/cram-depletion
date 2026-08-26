@@ -10,8 +10,11 @@ add_executable(unit_tests
   test_adjoint.cpp
   test_sensitivity.cpp)
 
-# The reader's tests need the reader; the stub-throws test lives in
-# test_chain.cpp beside the ENDFtk one and always runs.
+# The reader's tests need the reader. Its counterpart, ChainXml.StubsThrowWithoutReader,
+# lives in test_chain.cpp beside the ENDFtk one under #ifndef CRAM_WITH_CHAIN_XML,
+# so exactly one of the two is compiled in any configuration: with the reader,
+# the tests that parse; without it, the one that asserts the loaders throw
+# rather than leaving the chain silently empty.
 if(CRAM_WITH_CHAIN_XML)
   target_sources(unit_tests PRIVATE test_chain_xml.cpp)
 endif()
