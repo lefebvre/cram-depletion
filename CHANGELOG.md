@@ -52,6 +52,14 @@ needs, and the adjoint of the linear problem.
   densities to below 1e-3 for every nuclide the reference reports as present --
   all 181 of case `vera_pin1a`, asserted one by one, worst 4e-13 — not a
   curated subset.
+- `validation/report/`: a `validation-report` build target that replays the case
+  through the engine and writes the whole comparison — every nuclide, every step
+  — as JSON, and a standard-library-only Python renderer that turns that into a
+  standalone HTML report with inline SVG figures. Measurement and rendering are
+  separate steps, so the build's only hard dependency stays on the C++ side and
+  the JSON remains the machine-readable record. CI regenerates both on every
+  push and publishes them as an artifact; `vera_report --fail-over-tolerance N`
+  turns the comparison into a gate.
 
 Additive: 2.0 consumers build unchanged.
 
