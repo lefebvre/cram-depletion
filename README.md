@@ -19,6 +19,7 @@ cram/nuclide.hpp         ZAI identity + ENDF decay-mode -> daughter logic
 cram/chain.hpp           DepletionChain: nuclides, decay data, fission yields
 cram/cram.hpp            CRAM solver interface
 cram/cram.cpp            IPF-CRAM-16 / CRAM-48 (verified coefficients)
+cram/cram_solver.hpp     CramSolver: cached per-pole factorizations, reused symbolic analysis
 cram/burnup_matrix.cpp   matrix assembly (decay, fission source, reactions)
 cram/reaction.hpp        neutron reaction channels, products, OpenMC reaction names
 cram/integrator.hpp      time integrators (predictor, CE/CM, CE/LI, LE/QI, CF4)
@@ -27,6 +28,8 @@ cram/adjoint.hpp         adjoint solves, sensitivities, source/integrated genera
 cram/chain_xml.cpp       OpenMC depletion_chain XML reader (optional, pugixml)
 cram/endf_reader.cpp     ENDFtk ingestion (optional, see notes)
 cram-apps/deplete.cpp    runnable demo + ENDF driver
+validation/openmc/       offline OpenMC generator for the reference data
+validation/report/       the validation-report target: measure (C++) + render (Python)
 cmake/gcov_to_lcov.py    gcov JSON -> LCOV tracefile (consumed by VS Code)
 cmake/ResetCoverage.cmake  clear stale .gcda artifacts before a capture
 external/                FetchContent cache (gitignored; survives clean builds)
@@ -172,6 +175,10 @@ cmake -B build -DCRAM_ENABLE_SANITIZERS=ON && cmake --build build && ctest --tes
 clang-format --dry-run -Werror cram/*.{hpp,cpp} cram-apps/*.cpp tests/**/*.{hpp,cpp}
 cmake --build build --target cppcheck      # cppcheck
 clang-tidy -p build cram/*.cpp             # clang-tidy (config in .clang-tidy)
+
+# regenerate the OpenMC comparison report (JSON + standalone HTML)
+cmake -B build -DCRAM_WITH_CHAIN_XML=ON
+cmake --build build --target validation-report
 ```
 
 CTest test names are prefixed with `cram.` (e.g. `cram.Cram.ScalarExponential`)
@@ -189,17 +196,23 @@ file path matches `cmake.coverageInfoFiles` in `.vscode/settings.json`, so
 the CMake Tools extension surfaces line/branch gutters automatically once
 the `coverage` target has been built.
 
-`.github/workflows/ci.yml` runs format-check (gating the rest of the
-pipeline so noncompliant formatting fails fast), then build-test-coverage
+`.github/workflows/ci.yml` runs format-check first, gating the rest of the
+pipeline so noncompliant formatting fails fast. Behind it: build-test-coverage
 (with `gcovr` enforcing a 95% line-coverage floor + HTML artifact),
-a Windows MSVC build-and-test job, sanitizers, static-analysis, and the
-ENDFtk integration job. Test layout:
+validation-report (regenerates the OpenMC comparison and publishes the JSON and
+HTML as an artifact, with the headline numbers written to the run summary),
+a Windows MSVC build-and-test job, a clang build-and-test job, the address/UB
+and thread sanitizers, static-analysis, the eigen-fetch and install-consume
+packaging paths, version-tag-check, and the ENDFtk integration jobs on Linux
+and Windows. Test layout:
 
 ```
 tests/bateman.hpp        analytic Bateman references
 tests/test_nuclide.cpp   ZAI packing, RTYP decode, decay-mode -> daughter
 tests/test_chain.cpp     registration, decay/yield data, matrix assembly
 tests/test_cram.cpp      CRAM16/CRAM48 vs analytic; mass, stiffness, edge cases
+tests/test_cram_solver.cpp CramSolver: pattern reuse, split prepare, failure states
+tests/test_cram_golden.cpp pinned solver output against committed golden data
 tests/test_reaction.cpp  reaction products and OpenMC reaction names
 tests/test_integrator.cpp order-of-accuracy study; exactness under constant flux
 tests/test_deplete.cpp   DepletionSystem: normalization, validation, trajectories
@@ -210,6 +223,63 @@ tests/validation/        replay of OpenMC-generated VERA pin data (CRAM_WITH_CHA
 tests/integration/       real ENDFtk reader vs real ENDF data (WITH_ENDFTK only)
 testing/depletion_pin_fixture.hpp  hand-built thermal-pin chain + one-group XS
 ```
+
+## Depletion and burnup
+
+`cram/deplete.hpp` and `cram/integrator.hpp` build the burnup problem on top of
+the solver. A `DepletionSystem` is one material: one chain, one set of one-group
+microscopic cross sections, and a normalization that is either a fixed flux or a
+target fission power. It is the transport-free analogue of OpenMC's
+`IndependentOperator` -- the spectrum is frozen, but under a power target the
+flux magnitude floats as the fissile inventory burns, which is what makes `A`
+composition-dependent and the higher-order integrators worth having. A model
+with several burnable regions holds one system (and one integrator) per region
+and shares power between them itself.
+
+```cpp
+#include <cram/deplete.hpp>
+
+cram::DepletionSystem sys(chain);  // the chain must outlive the system
+sys.setReactions(u235, {
+    {.type = cram::ReactionType::Fission, .target = std::nullopt, .sigma = 41.0, .q = 1.94e8},
+    {.type = cram::ReactionType::NGamma, .target = u236, .sigma = 9.6},
+});
+sys.setConstantPower(30.0);  // W/cm^3, on the same volume basis as n
+
+auto integ = cram::makeIntegrator(cram::IntegratorKind::CECM, sys.matrixBuilder(),
+                                  cram::CramOrder::CRAM48);
+const cram::DepletionResult r = cram::deplete(*integ, n0, {30 * 86400.0, 30 * 86400.0});
+```
+
+`makeIntegrator` covers Predictor, CE/CM, CE/LI, LE/QI and CF4; the coefficients
+and the order in which the two CFQ4 exponentials are applied are taken from
+`openmc.deplete`, so given the same `A(n)` the trajectories match.
+`integratorKindFromName` parses the same set from a config file (`"predictor"`,
+`"cecm"`, `"celi"`, `"leqi"`, `"cf4"`). A march routes every exponential through
+one `CramSolver` the integrator owns, so the symbolic analysis inside the pole
+factorizations is paid once per march rather than once per exponential -- which
+also means a live integrator holds K complex LU factorizations (24 for CRAM48),
+a few MB at N~1700. Build the integrator inside the worker that marches a
+region rather than keeping one alive per region.
+
+The system refuses what would otherwise fail silently instead of guessing: a
+negative cross section, a negative or non-finite flux or power, a fission
+channel with no energy release under a power target, a composition with no
+fissile material asked to hold a non-zero power, and a chain modified after the
+system cached its decay matrix (`refreshChain()` re-caches it). A fissionable
+nuclide with no yield table is still consumed by its fission channel, so the
+power normalization cannot pay for fissions the matrix never performs.
+
+With `CRAM_WITH_CHAIN_XML`, `loadDepletionChainXml` fills a chain from an
+OpenMC `depletion_chain` XML and returns its reaction topology as
+`ChainReaction` entries; `reactionXs(channel, sigmaBarn)` turns one of those
+plus a cross section into a `ReactionXS`, carrying the channel's branching and
+fission Q across without the caller copying fields by hand. What the reader
+could not use is counted in a `ChainXmlDiagnostics` -- unparsed nuclides, decay
+targets, reaction targets and yield products, unmodeled reactions, unresolved
+yield delegations -- rather than stored as phantom nuclides. An absent or
+`"Nothing"` target is the file's own statement that the product is untracked
+and is not counted as a failure.
 
 ## Adjoint and sensitivities
 
@@ -262,6 +332,16 @@ OpenMC against the VERA depletion benchmark). Two layers, both transport-free:
    (never fails) when the data directory is absent, so a clean checkout without
    it still passes.
 
+The numbers quoted above are not prose: `cmake --build build --target
+validation-report` replays the case and writes the whole comparison — every
+nuclide, every step — as `build/validation/vera_report.json`, then renders it
+into a standalone `vera_validation_report.html` with inline SVG figures. CI
+regenerates both on every push and publishes them as an artifact. The measure
+step needs only the C++ build; the render step needs only a stdlib Python 3, and
+is skipped (JSON still written) if no interpreter is found at configure time.
+`vera_report` also takes `--fail-over-tolerance N` to turn the comparison into a
+gate. See [validation/report/](validation/report/).
+
 ## How CRAM works here
 
 `exp(At) n0 ≈ α₀ · Πₗ ( I + 2·Re( αₗ (At − θₗ I)⁻¹ ) ) n0`, applied
@@ -284,17 +364,27 @@ OpenMC (MIT license) and were checked against analytic Bateman solutions to
   `addFissionSource(...)`.
 - **Register daughters.** A production term is dropped if the daughter isn't in
   the chain. `loadDecayData` adds reachable daughters; if you build chains by
-  hand, `chain.add(...)` every product first.
+  hand, `chain.add(...)` every product first. Where the product is not what the
+  RTYP arithmetic derives — a chain that names a metastable target, say — set
+  `DecayMode::daughter`; matrix assembly and `close()` honor it over the
+  derived one.
 - **Build the data structs with braces.** `Zai`, `DecayMode`, `DecayData` and
   `FissionYields` leave the members whose zero value would be a plausible wrong
-  answer — `Zai::z`/`::a`, every `DecayMode` field, `DecayData::halfLife`,
-  `FissionYields::energy` — without a default initializer, so omitting one is a
-  `-Wmissing-field-initializers` diagnostic rather than a nuclide that silently
-  never decays or a yield table that silently becomes a spontaneous-fission one.
+  answer — `Zai::z`/`::a`, `DecayMode`'s `rtyp`/`branching`/`finalState`/
+  `isFission`, `DecayData::halfLife`, `FissionYields::energy` — without a
+  default initializer, so omitting one is a `-Wmissing-field-initializers`
+  diagnostic rather than a nuclide that silently never decays or a yield table
+  that silently becomes a spontaneous-fission one. `ReactionXS` follows the same
+  rule for `type`, `target` and `sigma`: a forgotten sigma is a channel that
+  never fires and a forgotten target is one that silently destroys atoms, so
+  `target = std::nullopt` must be written out to mean "product not tracked".
   `DecayData d; d.halfLife = ...;` leaves the rest indeterminate: write
   `DecayData d{.halfLife = ...}` instead. Members that do keep an initializer —
-  `Zai::i` (ground state), `DecayData::decayConstant` (derived by `setDecay`),
-  `gammaEnergyPerDecay`, and the two vectors — are optional by design.
+  `Zai::i` (ground state), `DecayMode::daughter` (derived from the RTYP unless
+  named), `DecayData::decayConstant` (derived by `setDecay`),
+  `gammaEnergyPerDecay`, the two vectors, and `ReactionXS::q`/`::energy` — are
+  optional by design. Initialize `DecayMode` with designators so that the
+  trailing `daughter` is omitted deliberately.
 - **CRAM accuracy is absolute, not relative, for trace species.** Nuclides many
   orders of magnitude below the dominant one can come out slightly negative
   (~1e-17). That is expected; clamp at zero if you need non-negativity.
@@ -315,5 +405,9 @@ OpenMC (MIT license) and were checked against analytic Bateman solutions to
   the OpenMC set, for Xe stability on very large systems.
 - One-group collapse of MF3 cross sections (or ACE data) to get reaction rates
   for `(n,γ)`, `(n,2n)`, fission, etc.
-- A sparsity-preserving ordering / reuse of the symbolic factorization across
-  poles for speed on the full ~3800-nuclide ENDF/B-VIII chain.
+- A sparsity-preserving ordering, and one symbolic analysis shared across the K
+  poles of a single `prepare()`, for speed on the full ~3800-nuclide
+  ENDF/B-VIII chain. The analysis is already reused across `prepare()` calls
+  that see the same pattern — and so across a whole march — but every pole
+  still derives its own on the first one, though all K pole matrices share the
+  burnup matrix's sparsity.
