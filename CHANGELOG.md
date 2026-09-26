@@ -5,6 +5,19 @@ the top-level `CMakeLists.txt` and CI refuses a tag that disagrees with it.
 Past 1.0 the major is the breaking-change axis, so a consumer that asked for
 `find_package(cram 2.0)` is satisfied by any 2.x.
 
+## Unreleased
+
+- `cram/cram_poles.hpp`: the CRAM16 and CRAM48 coefficients are public, through
+  `cramPoles(CramOrder)`, for callers that evaluate the same IPF rational
+  approximation with their own linear algebra, for example a substitution on a
+  decay-only matrix, which is triangular in decay order. The header includes no
+  Eigen header. It replaces the uninstalled `cram_poles_internal.hpp`, and
+  `cramSolve()` and `CramSolver` now read their tables through `cramPoles()`, so
+  a caller cannot drift from the library's own coefficients. The tables are
+  unchanged byte for byte, and results are bit-identical.
+- `CramOrder` moves to `cram/cram_poles.hpp`. `cram/cram.hpp` includes it, so
+  existing code that names `cram::CramOrder` compiles unchanged.
+
 ## 2.1.0
 
 Burnup: everything upstream of the matrix that a fixed-cross-section depletion

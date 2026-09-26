@@ -11,13 +11,14 @@
 //     exp(At) n0 ~ alpha0 * PROD_l ( I + 2 Re( alpha_l (At - theta_l I)^-1 ) ) n0
 //
 // applied incrementally to the running vector. Each pole requires one complex
-// sparse linear solve; CRAM16 uses 8 poles, CRAM48 uses 24.
+// sparse linear solve; CRAM16 uses 8 poles, CRAM48 uses 24. The coefficients,
+// and CramOrder itself, are published in cram/cram_poles.hpp.
 //
 #include <Eigen/SparseCore>
 
-namespace cram {
+#include "cram/cram_poles.hpp"
 
-enum class CramOrder { CRAM16 = 16, CRAM48 = 48 };
+namespace cram {
 
 // Solve n(t) = exp(A * dt) * n0.
 // `A` is the real burnup matrix (see chain.hpp for the sign convention).

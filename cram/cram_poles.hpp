@@ -1,8 +1,26 @@
 #pragma once
 //
-// Internal IPF-CRAM pole tables shared by cramSolve (one-shot) and CramSolver
-// (cached). NOT part of the public API — do not include from anywhere outside
-// the cram library implementation.
+// The IPF-CRAM pole tables, published for callers that evaluate the same
+// rational approximation with their own linear algebra: a solver specialized to
+// a matrix structure (a decay-only matrix is triangular in decay order, so each
+// pole solve is a substitution rather than a factorization), or code that cannot
+// include Eigen. cramSolve() and CramSolver read these same tables through
+// cramPoles(), so a caller evaluating them reproduces the library's
+// approximation, not a transcription of it.
+//
+// Deliberately free of Eigen: this header needs only <array>, <complex> and
+// <span>.
+//
+// The incomplete partial fraction (IPF) form, Pusa 2016, for a real matrix A
+// and step t:
+//
+//     exp(At) n0 ~ alpha0 * PROD_l ( I + 2 Re( alpha_l (At - theta_l I)^-1 ) ) n0
+//
+// applied in pole order to the running vector; for a scalar z = lambda t it
+// reads alpha0 * PROD_l (1 + 2 Re(alpha_l / (z - theta_l))). Only one pole of
+// each complex-conjugate pair is stored -- the 2 Re(...) accounts for its
+// partner -- and every stored theta has a strictly positive imaginary part, so
+// (At - theta_l I) is nonsingular for any real A.
 //
 // Transcribed verbatim from OpenMC's openmc/deplete/cram.py (MIT License,
 // (c) MIT / UChicago Argonne LLC and OpenMC contributors), which in turn
@@ -11,8 +29,21 @@
 //
 #include <array>
 #include <complex>
+#include <span>
 
-namespace cram::internal {
+namespace cram {
+
+enum class CramOrder { CRAM16 = 16, CRAM48 = 48 };
+
+// One order's coefficients. The spans view the constant tables below, so a
+// CramPoles stays valid for the life of the program.
+struct CramPoles {
+  double alpha0;
+  std::span<const std::complex<double>> theta;
+  std::span<const std::complex<double>> alpha;  // alpha[l] pairs with theta[l]
+};
+
+namespace detail {
 
 using cd = std::complex<double>;
 
@@ -77,4 +108,14 @@ inline constexpr std::array<cd, 24> kAlpha48 = {{
 }};
 // NOLINTEND(modernize-use-std-numbers)
 
-}  // namespace cram::internal
+}  // namespace detail
+
+// The coefficients of `order`. Anything other than CRAM16 reads as CRAM48, as it
+// does in cramSolve() and CramSolver.
+constexpr CramPoles cramPoles(CramOrder order) noexcept {
+  if (order == CramOrder::CRAM16)
+    return {.alpha0 = detail::kAlpha0_16, .theta = detail::kTheta16, .alpha = detail::kAlpha16};
+  return {.alpha0 = detail::kAlpha0_48, .theta = detail::kTheta48, .alpha = detail::kAlpha48};
+}
+
+}  // namespace cram

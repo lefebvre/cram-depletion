@@ -3,6 +3,7 @@ add_executable(unit_tests
   test_chain.cpp
   test_reaction.cpp
   test_cram.cpp
+  test_cram_poles.cpp
   test_cram_solver.cpp
   test_cram_golden.cpp
   test_integrator.cpp

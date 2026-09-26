@@ -18,7 +18,8 @@ Solves `n(t) = exp(A t) n0` where `A` is the burnup matrix
 cram/nuclide.hpp         ZAI identity + ENDF decay-mode -> daughter logic
 cram/chain.hpp           DepletionChain: nuclides, decay data, fission yields
 cram/cram.hpp            CRAM solver interface
-cram/cram.cpp            IPF-CRAM-16 / CRAM-48 (verified coefficients)
+cram/cram.cpp            IPF-CRAM-16 / CRAM-48
+cram/cram_poles.hpp      the verified CRAM16/CRAM48 coefficients and CramOrder (Eigen-free)
 cram/cram_solver.hpp     CramSolver: cached per-pole factorizations, reused symbolic analysis
 cram/burnup_matrix.cpp   matrix assembly (decay, fission source, reactions)
 cram/reaction.hpp        neutron reaction channels, products, OpenMC reaction names
@@ -106,8 +107,13 @@ target_link_libraries(my_target PRIVATE cram::cram)
 ```
 
 `#include <cram/cram.hpp>` then resolves from the install tree.
-`cram_poles_internal.hpp` is not installed: it is an implementation detail
-included only by `cram/*.cpp`.
+
+`<cram/cram_poles.hpp>` publishes the CRAM16 and CRAM48 coefficients through
+`cram::cramPoles(order)` for callers that evaluate the same rational
+approximation with their own linear algebra, for example a substitution on a
+decay-only matrix, which is triangular in decay order. It includes no Eigen
+header, so code that cannot compile Eigen can still use it. `cramSolve()` and
+`CramSolver` read the same tables through the same function.
 
 ### Versioning
 
