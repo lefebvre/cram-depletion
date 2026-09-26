@@ -5,7 +5,9 @@ the top-level `CMakeLists.txt` and CI refuses a tag that disagrees with it.
 Past 1.0 the major is the breaking-change axis, so a consumer that asked for
 `find_package(cram 2.0)` is satisfied by any 2.x.
 
-## Unreleased
+## 2.2.0
+
+Public CRAM coefficients, for callers that bring their own linear algebra.
 
 - `cram/cram_poles.hpp`: the CRAM16 and CRAM48 coefficients are public, through
   `cramPoles(CramOrder)`, for callers that evaluate the same IPF rational
