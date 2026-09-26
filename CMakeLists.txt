@@ -512,10 +512,10 @@ if(CRAM_ENABLE_INSTALL)
   install(TARGETS deplete RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
   # Listed rather than globbed so that adding a header is a deliberate decision
-  # about whether it is public. cram_poles_internal.hpp is intentionally absent:
-  # it is included only by cram/*.cpp, never by an installed header.
+  # about whether it is public.
   install(FILES
     cram/cram.hpp
+    cram/cram_poles.hpp
     cram/cram_solver.hpp
     cram/chain.hpp
     cram/nuclide.hpp

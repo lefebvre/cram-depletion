@@ -3,21 +3,15 @@
 #include <algorithm>
 #include <stdexcept>
 
-#include "cram/cram_poles_internal.hpp"
+#include "cram/cram_poles.hpp"
 
 namespace cram {
 
 CramSolver::CramSolver(CramOrder order) : order_(order) {
-  using namespace cram::internal;
-  if (order == CramOrder::CRAM16) {
-    alpha0_ = kAlpha0_16;
-    theta_.assign(kTheta16.begin(), kTheta16.end());
-    alpha_.assign(kAlpha16.begin(), kAlpha16.end());
-  } else {
-    alpha0_ = kAlpha0_48;
-    theta_.assign(kTheta48.begin(), kTheta48.end());
-    alpha_.assign(kAlpha48.begin(), kAlpha48.end());
-  }
+  const CramPoles poles = cramPoles(order);
+  alpha0_ = poles.alpha0;
+  theta_.assign(poles.theta.begin(), poles.theta.end());
+  alpha_.assign(poles.alpha.begin(), poles.alpha.end());
   lus_.resize(theta_.size());
   std::generate(lus_.begin(), lus_.end(),
                 [] { return std::make_unique<Eigen::SparseLU<Eigen::SparseMatrix<cd>>>(); });

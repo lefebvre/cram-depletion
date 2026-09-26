@@ -1,11 +1,15 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <complex>
+#include <cstddef>
 #include <stdexcept>
 #include <vector>
 
 #include "bateman.hpp"
 #include "cram/cram.hpp"
+#include "cram/cram_poles.hpp"
+#include "cram/cram_solver.hpp"
 
 using namespace cram;
 using cram_test::batemanLinearChain;
@@ -58,6 +62,30 @@ void expectClose(const Eigen::VectorXd& got, const std::vector<double>& ref, dou
 constexpr double kRel48 = 1e-9;
 constexpr double kRel16 = 1e-4;
 constexpr double kAbs = 1e-10;
+
+// exp(A t) e_0 for the linearChain(lambda) matrix, evaluated from the published
+// coefficients by substitution: the matrix is lower triangular, so each pole
+// solve (A t - theta_l I) x = y is a forward sweep with no factorization.
+std::vector<double> substitutionOnChain(const std::vector<double>& lambda, double t,
+                                        const CramPoles& p) {
+  const std::size_t n = lambda.size();
+  std::vector<double> y(n, 0.0);
+  y[0] = 1.0;
+  std::vector<std::complex<double>> x(n);
+  for (std::size_t l = 0; l < p.theta.size(); ++l) {
+    for (std::size_t i = 0; i < n; ++i) {
+      std::complex<double> s = y[i];
+      if (i > 0)
+        s -= t * lambda[i - 1] * x[i - 1];
+      x[i] = s / (-t * lambda[i] - p.theta[l]);
+    }
+    for (std::size_t i = 0; i < n; ++i)
+      y[i] += 2.0 * (p.alpha[l] * x[i]).real();
+  }
+  for (double& v : y)
+    v *= p.alpha0;
+  return y;
+}
 
 }  // namespace
 
@@ -167,6 +195,29 @@ TEST(Cram, Orders16And48Agree) {
   for (int i = 0; i < n48.size(); ++i) {
     if (std::abs(n48(i)) > 1e-8) {
       EXPECT_NEAR(n16(i), n48(i), 1e-4 * std::abs(n48(i))) << "index " << i;
+    }
+  }
+}
+
+// A caller evaluating the published coefficients with its own linear algebra
+// must get the library's answer. Here that is the substitution a decay-only
+// matrix admits. The chain includes a stiff member (lambda t = 1.4e4) and a
+// stable terminator. Agreement is to round-off; the two paths divide and
+// accumulate in different orders.
+TEST(Cram, SubstitutionOnThePublishedPolesMatchesTheSolvers) {
+  const std::vector<double> lambda = {0.3, 2.0e3, 1.0e-4, 0.0};
+  const int n = static_cast<int>(lambda.size());
+  const double t = 7.0;
+  const auto A = linearChain(lambda);
+  for (CramOrder order : {CramOrder::CRAM16, CramOrder::CRAM48}) {
+    const std::vector<double> y = substitutionOnChain(lambda, t, cramPoles(order));
+    const Eigen::VectorXd oneShot = cramSolve(A, unitFirst(n), t, order);
+    CramSolver solver(order);
+    solver.prepare(A, t);
+    const Eigen::VectorXd cached = solver.apply(unitFirst(n));
+    for (int i = 0; i < n; ++i) {
+      EXPECT_NEAR(y[i], oneShot(i), 1e-14) << "order " << static_cast<int>(order) << " i " << i;
+      EXPECT_NEAR(y[i], cached(i), 1e-14) << "order " << static_cast<int>(order) << " i " << i;
     }
   }
 }
