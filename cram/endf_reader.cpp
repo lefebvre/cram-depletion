@@ -127,8 +127,8 @@ int loadFissionYields(DepletionChain& chain, const std::string& path, bool useCu
     // none. Refuse a material without the header rather than guess the ground
     // state.
     if (!material.hasSection(1, 451))
-      throw std::runtime_error("cram: ENDF material " + std::to_string(material.MAT()) +
-                               " in '" + path +
+      throw std::runtime_error("cram: ENDF material " + std::to_string(material.MAT()) + " in '" +
+                               path +
                                "' has fission yields but no MF1/MT451, so the "
                                "isomeric state of its parent is unknown");
     const int parentState = static_cast<int>(material.section(1, 451).parse<1, 451>().LISO());

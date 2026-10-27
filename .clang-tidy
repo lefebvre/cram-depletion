@@ -19,6 +19,9 @@ Checks: >
   -cppcoreguidelines-pro-bounds-pointer-arithmetic,
   -cppcoreguidelines-pro-bounds-constant-array-index
 
-WarningsAsErrors: ''
+# The bug-class families fail the static-analysis job; the style families stay
+# advisory, since their findings are judgments rather than defects and gating
+# on them would make every new check in a clang-tidy release a CI failure.
+WarningsAsErrors: 'bugprone-*,performance-*'
 HeaderFilterRegex: 'cram/.*'
 FormatStyle: none

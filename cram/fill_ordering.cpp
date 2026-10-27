@@ -100,7 +100,8 @@ SymmetricPermutation fillReducingOrder(const Eigen::SparseMatrix<Scalar>& A) {
     std::vector<Eigen::Triplet<double>> t;
     for (int q = 0; q < m; ++q) {
       t.emplace_back(q, q, 1.0);
-      for (typename Eigen::SparseMatrix<Scalar>::InnerIterator it(A, comp[static_cast<std::size_t>(q)]);
+      for (typename Eigen::SparseMatrix<Scalar>::InnerIterator it(
+               A, comp[static_cast<std::size_t>(q)]);
            it; ++it) {
         const int r = local[static_cast<std::size_t>(it.row())];
         if (r >= 0)

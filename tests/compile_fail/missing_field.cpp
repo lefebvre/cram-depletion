@@ -59,8 +59,8 @@ int main() {
                         .q = 2.0e8,
                         .branching = 1.0};
 #endif
-  return (m.isFission || d.halfLife < 0.0 || y.energy < 0.0 || r.sigma < 0.0 ||
-          c.branching < 0.0 || !z.representable())
+  return (m.isFission || d.halfLife < 0.0 || y.energy < 0.0 || r.sigma < 0.0 || c.branching < 0.0 ||
+          !z.representable())
              ? 1
              : 0;
 }

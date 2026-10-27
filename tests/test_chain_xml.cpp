@@ -6,6 +6,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 
 #include "cram/chain.hpp"
 #include "cram/chain_xml.hpp"
@@ -80,11 +81,14 @@ const char* kDirtyChainXml = R"XML(<depletion_chain>
   <nuclide name="Xe135"/>
 </depletion_chain>)XML";
 
-std::optional<DecayMode> modeTo(const DecayData& d, const Zai& daughter) {
+// Null when no mode names `daughter`. A pointer rather than an optional so
+// that ASSERT_NE(..., nullptr) guards the accesses in a way clang-tidy's
+// unchecked-optional-access can follow; it cannot see that ASSERT_TRUE returns.
+const DecayMode* modeTo(const DecayData& d, const Zai& daughter) {
   for (const auto& m : d.modes)
     if (m.daughter == daughter)
-      return m;
-  return std::nullopt;
+      return &m;
+  return nullptr;
 }
 
 // A temporary file that is removed when the test scope ends.
@@ -94,7 +98,12 @@ struct TempFile {
       : path(std::filesystem::temp_directory_path() / stem) {
     std::ofstream(path) << text;
   }
-  ~TempFile() { std::filesystem::remove(path); }
+  // The error_code overload: a destructor must not throw, and a file that is
+  // already gone is not worth failing a test over.
+  ~TempFile() {
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+  }
 };
 
 }  // namespace
@@ -113,16 +122,16 @@ TEST(ChainXml, ParseNuclideName) {
 
 // Each of these used to parse as a plausible nuclide the file never named.
 TEST(ChainXml, ParseNuclideNameRejectsAnythingBeyondTheGrammar) {
-  EXPECT_FALSE(parseNuclideName("U235x").has_value());      // trailing junk
-  EXPECT_FALSE(parseNuclideName("U235_").has_value());      // empty suffix
-  EXPECT_FALSE(parseNuclideName("U235_m").has_value());     // no level
-  EXPECT_FALSE(parseNuclideName("U235_mx").has_value());    // non-numeric level
-  EXPECT_FALSE(parseNuclideName("U235_m1x").has_value());   // junk after level
-  EXPECT_FALSE(parseNuclideName("U235_x1").has_value());    // not a metastable tag
+  EXPECT_FALSE(parseNuclideName("U235x").has_value());         // trailing junk
+  EXPECT_FALSE(parseNuclideName("U235_").has_value());         // empty suffix
+  EXPECT_FALSE(parseNuclideName("U235_m").has_value());        // no level
+  EXPECT_FALSE(parseNuclideName("U235_mx").has_value());       // non-numeric level
+  EXPECT_FALSE(parseNuclideName("U235_m1x").has_value());      // junk after level
+  EXPECT_FALSE(parseNuclideName("U235_x1").has_value());       // not a metastable tag
   EXPECT_FALSE(parseNuclideName("U99999999999").has_value());  // mass overflows int
-  EXPECT_FALSE(parseNuclideName("U1000").has_value());      // mass beyond the key
-  EXPECT_FALSE(parseNuclideName("U0").has_value());         // no nuclide has A = 0
-  EXPECT_FALSE(parseNuclideName("Am242_m10").has_value());  // level beyond the key
+  EXPECT_FALSE(parseNuclideName("U1000").has_value());         // mass beyond the key
+  EXPECT_FALSE(parseNuclideName("U0").has_value());            // no nuclide has A = 0
+  EXPECT_FALSE(parseNuclideName("Am242_m10").has_value());     // level beyond the key
   EXPECT_EQ(parseNuclideName("Am242_M1"), (Zai{95, 242, 1}));
 }
 
@@ -183,12 +192,12 @@ TEST(ChainXml, LoadChain) {
   const DecayData* u235 = chain.decay({92, 235, 0});
   ASSERT_NE(u235, nullptr);
   EXPECT_NEAR(u235->halfLife, 2.22102e16, 1e9);
-  const auto alpha = modeTo(*u235, Zai{90, 231, 0});
-  ASSERT_TRUE(alpha.has_value());
+  const DecayMode* alpha = modeTo(*u235, Zai{90, 231, 0});
+  ASSERT_NE(alpha, nullptr);
   EXPECT_DOUBLE_EQ(alpha->branching, 0.99999999993);
   EXPECT_FALSE(alpha->isFission);
-  const auto sf = modeTo(*u235, Zai{92, 235, 0});
-  ASSERT_TRUE(sf.has_value());
+  const DecayMode* sf = modeTo(*u235, Zai{92, 235, 0});
+  ASSERT_NE(sf, nullptr);
   EXPECT_DOUBLE_EQ(sf->branching, 7.0e-11);
   EXPECT_FALSE(sf->isFission);
   EXPECT_EQ(u235->modes.size(), 2u);

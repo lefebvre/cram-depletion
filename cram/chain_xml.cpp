@@ -75,10 +75,10 @@ std::optional<Zai> parseNuclideName(std::string_view name) {
 
   int iso = 0;
   if (j < name.size()) {
-    std::size_t k = j;
-    if (name[k++] != '_' || k >= name.size() || (name[k] != 'm' && name[k] != 'M'))
+    const std::size_t m = j + 1;  // where the 'm' of "_m<level>" must be
+    if (name[j] != '_' || m >= name.size() || (name[m] != 'm' && name[m] != 'M'))
       return std::nullopt;
-    if (!parseDigits(k + 1, name.size(), iso))
+    if (!parseDigits(m + 1, name.size(), iso))
       return std::nullopt;
   }
 
@@ -216,8 +216,8 @@ void parseFissionYields(const pugi::xml_node& nfy, const Zai& parent, DepletionC
     // tail, so a mismatch is a damaged table.
     if (products.size() != data.size())
       throwMalformed(parent, "fission_yields table",
-                     std::to_string(products.size()) + " products, " +
-                         std::to_string(data.size()) + " yields");
+                     std::to_string(products.size()) + " products, " + std::to_string(data.size()) +
+                         " yields");
     for (std::size_t k = 0; k < products.size(); ++k) {
       const std::optional<double> yield = parseDouble(data[k]);
       if (!yield)

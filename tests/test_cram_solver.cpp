@@ -352,7 +352,7 @@ TEST(FillOrdering, IsAPermutationToBlockLowerTriangularForm) {
   // A cycle a -> b -> c -> a hanging off a tail d: the three-nuclide block keeps
   // its internal entries above the diagonal, the tail none.
   std::vector<Eigen::Triplet<double>> t = {{0, 0, -1.0}, {1, 0, 1.0}, {1, 1, -1.0}, {2, 1, 1.0},
-                                           {2, 2, -1.0}, {0, 2, 0.5}, {3, 2, 0.5}, {3, 3, -1.0}};
+                                           {2, 2, -1.0}, {0, 2, 0.5}, {3, 2, 0.5},  {3, 3, -1.0}};
   Eigen::SparseMatrix<double> cyclic(4, 4);
   cyclic.setFromTriplets(t.begin(), t.end());
   const int above = blockLowerTriangular(cyclic);

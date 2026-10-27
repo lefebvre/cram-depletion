@@ -137,8 +137,7 @@ Eigen::SparseMatrix<double> DepletionSystem::assemble(const Eigen::VectorXd& n) 
         // track. Dropping the whole channel instead would leave
         // fissionPowerWeight() crediting energy the matrix never releases, so
         // constant-power normalization would silently under-burn.
-        chain_.reactionStencil(parent, r.type == ReactionType::Fission, r.target, r.energy,
-                               column);
+        chain_.reactionStencil(parent, r.type == ReactionType::Fission, r.target, r.energy, column);
         for (const auto& [j, c] : column)
           t.emplace_back(j, pi, rate * c);
       }
