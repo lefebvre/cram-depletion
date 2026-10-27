@@ -7,6 +7,7 @@
 #include "cram/adjoint.hpp"
 #include "cram/chain.hpp"
 #include "cram/cram.hpp"
+#include "cram/cram_solver.hpp"
 #include "cram/deplete.hpp"
 #include "cram/integrator.hpp"
 #include "cyclic_chain.hpp"
@@ -193,6 +194,25 @@ TEST(Adjoint, IntervalMatricesRefuseConstantPower) {
   configurePinReactions(sys);
   sys.setConstantPower(1.0);
   EXPECT_THROW(intervalMatrices(sys, {1.0e14}), std::invalid_argument);
+}
+
+// The adjoint from the forward factorizations must equal a solve on the
+// materialized transpose. A cyclic chain, so SparseLU pivots and forms
+// supernodes and the transposed triangular solves see a non-trivial factor.
+TEST(Adjoint, ApplyTransposeMatchesASolveOnTheTranspose) {
+  const CyclicChain c = buildCyclicChain(300);
+  Eigen::VectorXd w(c.A.rows());
+  for (int i = 0; i < w.size(); ++i)
+    w(i) = 1.0 + 0.003 * i;
+  for (CramOrder order : {CramOrder::CRAM16, CramOrder::CRAM48}) {
+    CramSolver solver(order);
+    solver.prepare(c.A, 3.0e5);
+    const Eigen::VectorXd shared = solver.applyTranspose(w);
+    const Eigen::VectorXd direct = cramSolveAdjoint(c.A, w, 3.0e5, order);
+    EXPECT_LT((shared - direct).norm(), 1e-12 * direct.norm());
+  }
+  CramSolver unprepared;
+  EXPECT_THROW(unprepared.applyTranspose(w), std::logic_error);
 }
 
 // Building the schedule sets each interval's flux in turn; the system must

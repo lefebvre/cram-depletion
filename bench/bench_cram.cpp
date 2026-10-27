@@ -15,7 +15,10 @@
 // "representative of a real depletion chain".
 #include <benchmark/benchmark.h>
 
+#include <vector>
+
 #include "acyclic_chain.hpp"
+#include "cram/adjoint.hpp"
 #include "cram/chain.hpp"
 #include "cram/cram.hpp"
 #include "cram/cram_solver.hpp"
@@ -224,5 +227,28 @@ void BM_FissionSourceAssembly(benchmark::State& state) {
   state.counters["parents"] = static_cast<double>(fixture.fissionParents.size());
 }
 BENCHMARK(BM_FissionSourceAssembly)->Arg(256)->Arg(1024)->Arg(1675);
+
+// --- sensitivities ----------------------------------------------------------
+// rateSensitivities() for one interval of the burnup shape. Its cost is the
+// number of prepare() calls the quadrature makes, so this is where a change to
+// how nodes share factorizations shows up. The coarsest end grading keeps the
+// node count (and the run time) modest; the per-node cost is what is measured.
+
+void BM_RateSensitivities(benchmark::State& state) {
+  const int n = static_cast<int>(state.range(0));
+  const auto chain = cram_test::buildCyclicChain(n);
+  const std::vector<Eigen::SparseMatrix<double>> A = {chain.A};
+  const std::vector<double> dts = {30.0 * kDay};
+  const Eigen::VectorXd w = Eigen::VectorXd::Ones(n);
+  const cram::DepletionResult fwd = cram::depleteLinear(A, dts, chain.n0);
+  const cram::AdjointResult adj = cram::adjointDeplete(A, dts, w);
+  const cram::SensitivityOptions options{.gaussPoints = 5, .subIntervals = 4, .endRefinements = 2};
+
+  for (auto _ : state) {
+    auto S = cram::rateSensitivities(fwd, adj, A, dts, options);
+    benchmark::DoNotOptimize(S);
+  }
+}
+BENCHMARK(BM_RateSensitivities)->Arg(256)->Arg(1024)->Unit(benchmark::kMillisecond);
 
 }  // namespace

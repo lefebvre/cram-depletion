@@ -61,6 +61,14 @@ public:
   // per-pole solve reports failure.
   Eigen::VectorXd apply(const Eigen::VectorXd& n0) const;
 
+  // Apply exp(A^T*dt) to n0 from the same cached factorizations, with the
+  // same preconditions and errors as apply(). The transpose of the LU of
+  // (A*dt - theta_l*I) solves (A^T*dt - theta_l*I), and the CRAM factors are
+  // all rational functions of one matrix, so they commute and the transposed
+  // product needs no reordering. This is what lets an adjoint at time dt share
+  // the factorization a forward solve at time dt already paid for.
+  Eigen::VectorXd applyTranspose(const Eigen::VectorXd& n0) const;
+
   int size() const { return n_; }
   CramOrder order() const { return order_; }
   bool prepared() const { return prepared_; }

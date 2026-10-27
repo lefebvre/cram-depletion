@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <stdexcept>
@@ -70,17 +71,9 @@ void requireSchedule(const std::vector<Eigen::SparseMatrix<double>>& A,
                                 std::to_string(dts.size()) + " intervals)");
 }
 
-// exp(G dt) applied to (v; 1) for G = sourceGenerator(M, s): the first N
-// entries of the result are exp(M dt) v + integral_0^dt exp(M u) s du.
-// One step of an inhomogeneous problem through an ALREADY BUILT (N+1)x(N+1)
-// generator G = sourceGenerator(M, s): exp(G dt) applied to (v; 1), with the
-// trailing 1 dropped.
-//
-// G is a parameter rather than built here because only `dt` varies across the
-// calls that matter. rateSensitivities() steps from one interval's generator to
-// every quadrature node in it -- 80 of them at the default rule, 200 at the
-// settings the tests use -- and building it per node copied the whole triplet
-// list of A each time for a matrix that never changed.
+// One step of an inhomogeneous problem: exp(G dt) applied to (v; 1) for
+// G = sourceGenerator(M, s), with the trailing 1 dropped, which is
+// exp(M dt) v + integral_0^dt exp(M u) s du.
 Eigen::VectorXd stepWithSource(CramSolver& solver, const Eigen::SparseMatrix<double>& G,
                                const Eigen::VectorXd& v, double dt) {
   const Eigen::Index N = G.rows() - 1;
@@ -362,36 +355,70 @@ std::vector<Eigen::SparseMatrix<double>> rateSensitivities(
 
   std::vector<Eigen::SparseMatrix<double>> S;
   S.reserve(dts.size());
-  CramSolver forward(order);
-  CramSolver backward(order);
+  const Eigen::Index N = fwd.n.front().size();
+  const bool integrated = adj.integratedWeight.has_value();
+  CramSolver solver(order);
+  std::vector<std::pair<double, double>> nodes;  // (offset from interval start, weight)
   for (std::size_t k = 0; k < dts.size(); ++k) {
     Eigen::SparseMatrix<double> Sk = pattern;  // zeros with the union structure
-    const Eigen::SparseMatrix<double> At = transposed(A[k]);
-    // Depends only on the interval, so it is built here and not at every node.
-    const Eigen::SparseMatrix<double> source = adj.integratedWeight
-                                                   ? sourceGenerator(At, *adj.integratedWeight)
-                                                   : Eigen::SparseMatrix<double>();
+
+    // Each node needs n at offset tau, exp(A tau) n_k, and n* at offset tau,
+    // exp(A^T (dt - tau)) n*_{k+1}. The node set is symmetric about the
+    // interval midpoint -- the pieces mirror each other and so do the Gauss
+    // points -- so dt - tau is the offset of the mirror node, and the transpose
+    // of the factorization prepared for exp(A tau_mirror) gives the adjoint at
+    // this one. One prepare() per node therefore serves a forward value and an
+    // adjoint value, half of what a forward and a backward solver each paying
+    // for their own would cost, with no marching error.
+    //
+    // For a time-integrated response the adjoint carries a source:
+    // n*(tau) = [exp(G (dt - tau)) (n*_{k+1}; 1)].head(N) with
+    // G = sourceGenerator(A^T, w) = [[A^T, w], [0, 0]]. Its transpose
+    // [[A, 0], [w^T, 0]] applied to (n_k; 0) yields exp(A tau) n_k in the top
+    // block, so the same pairing works on that (N+1)-sized matrix.
+    const Eigen::SparseMatrix<double> M =
+        integrated ? transposed(sourceGenerator(transposed(A[k]), *adj.integratedWeight)) : A[k];
+    Eigen::VectorXd forwardStart = Eigen::VectorXd::Zero(M.rows());
+    Eigen::VectorXd adjointEnd = Eigen::VectorXd::Zero(M.rows());
+    forwardStart.head(N) = fwd.n[k];
+    adjointEnd.head(N) = adj.nStar[k + 1];
+    if (integrated)
+      adjointEnd(N) = 1.0;
+
+    nodes.clear();
     for (const auto& [a, b] :
          quadraturePieces(dts[k], options.subIntervals, options.endRefinements)) {
       const double h = b - a;
-      for (std::size_t g = 0; g < rule.x.size(); ++g) {
-        // Offset of this node from the interval start, and from its end.
-        const double tau = a + 0.5 * (1.0 + rule.x[g]) * h;
-        const double rest = dts[k] - tau;
-        forward.prepare(A[k], tau);
-        const Eigen::VectorXd n = forward.apply(fwd.n[k]);
-        Eigen::VectorXd nStar;
-        if (adj.integratedWeight) {
-          nStar = stepWithSource(backward, source, adj.nStar[k + 1], rest);
-        } else {
-          backward.prepare(At, rest);
-          nStar = backward.apply(adj.nStar[k + 1]);
-        }
-        const double weight = 0.5 * h * rule.w[g];
-        for (Eigen::Index c = 0; c < Sk.outerSize(); ++c)
-          for (Eigen::SparseMatrix<double>::InnerIterator it(Sk, c); it; ++it)
-            it.valueRef() += weight * nStar(it.row()) * n(it.col());
+      for (std::size_t g = 0; g < rule.x.size(); ++g)
+        nodes.emplace_back(a + 0.5 * (1.0 + rule.x[g]) * h, 0.5 * h * rule.w[g]);
+    }
+
+    const auto accumulate = [&Sk](double weight, const Eigen::VectorXd& nStar,
+                                  const Eigen::VectorXd& n) {
+      for (Eigen::Index c = 0; c < Sk.outerSize(); ++c)
+        for (Eigen::SparseMatrix<double>::InnerIterator it(Sk, c); it; ++it)
+          it.valueRef() += weight * nStar(it.row()) * n(it.col());
+    };
+    const std::size_t m = nodes.size();
+    for (std::size_t g = 0; g < (m + 1) / 2; ++g) {
+      const std::size_t mirror = m - 1 - g;
+      const auto [tau, weight] = nodes[g];
+      const auto [tauMirror, weightMirror] = nodes[mirror];
+      if (std::abs(tauMirror - (dts[k] - tau)) > 1e-12 * dts[k])
+        throw std::logic_error("cram: rateSensitivities quadrature nodes are not symmetric");
+
+      solver.prepare(M, tau);
+      const Eigen::VectorXd n = solver.apply(forwardStart).head(N);
+      const Eigen::VectorXd nStarMirror = solver.applyTranspose(adjointEnd).head(N);
+      if (mirror == g) {  // the midpoint node is its own mirror
+        accumulate(weight, nStarMirror, n);
+        continue;
       }
+      solver.prepare(M, tauMirror);
+      const Eigen::VectorXd nMirror = solver.apply(forwardStart).head(N);
+      const Eigen::VectorXd nStar = solver.applyTranspose(adjointEnd).head(N);
+      accumulate(weight, nStar, n);
+      accumulate(weightMirror, nStarMirror, nMirror);
     }
     S.push_back(std::move(Sk));
   }
