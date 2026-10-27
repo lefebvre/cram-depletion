@@ -63,6 +63,34 @@ cmake --build build
 ctest --test-dir build -R VeraPin --output-on-failure
 ```
 
+## Constant-power references for the integrators
+
+`vera_pin1a` runs at a fixed flux with fixed cross sections, so its burnup
+matrix never changes and every integrator collapses to the same exact
+`exp(A·dt)`. That validates assembly and CRAM, but not the CE/CM, CE/LI, LE/QI
+and CF4 coefficients or the constant-power normalization.
+`generate_constant_power_refs.py` covers those: it rebuilds the case's problem
+in OpenMC's `IndependentOperator` (chain, micro cross sections and step-0
+densities read from the case directory, so no transport run and no
+nuclear-data library) and marches it at a constant fission-q power with each
+integrator:
+
+```bash
+python validation/openmc/generate_constant_power_refs.py \
+  --case-dir tests/validation/data/vera_pin1a
+```
+
+It writes `constant_power/power.csv` and one `constant_power/<scheme>.csv` per
+integrator into the case directory. The `VeraPinConstantPower` tests replay
+each and SKIP while the files are absent. Their tolerance (1e-8 relative) is
+provisional until the agreement has been measured: run the tests once, read
+the `*_worst_*` properties they record, and tighten
+`kConstantPowerRelTol`/`kConstantPowerAbsTol` to the measured worst plus
+margin, as was done for the fixed-flux case.
+
+The script was written against the OpenMC 0.15 API but has not yet been run;
+expect to adjust a call signature on first use.
+
 ## Notes
 
 * The OpenMC depletion Python API changes between releases. This script targets
