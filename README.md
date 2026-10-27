@@ -33,14 +33,14 @@ validation/openmc/       offline OpenMC generator for the reference data
 validation/report/       the validation-report target: measure (C++) + render (Python)
 cmake/gcov_to_lcov.py    gcov JSON -> LCOV tracefile (consumed by VS Code)
 cmake/ResetCoverage.cmake  clear stale .gcda artifacts before a capture
-external/                FetchContent cache (gitignored; survives clean builds)
 ```
 
 ## Build
 
 Requires CMake >= 3.28 and a C++20 compiler. Eigen, googletest, and ENDFtk
-are pulled via FetchContent if not found system-wide; their sources land in
-`external/` so they're not re-cloned on every clean build. The Eigen fallback
+are pulled via FetchContent if not found system-wide, into each build tree's
+`_deps/` (pass `-DFETCHCONTENT_SOURCE_DIR_<NAME>=<path>` to reuse a local
+checkout instead of fetching). The Eigen fallback
 defaults to v5.0.1 and is configurable (see `CRAM_EIGEN_GIT_TAG` below).
 
 ```bash

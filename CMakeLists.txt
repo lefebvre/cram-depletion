@@ -19,10 +19,15 @@ endif()
 # INSTALL_INTERFACE, not just the install rules at the end of this file.
 include(GNUInstallDirs)
 
-# Cache FetchContent downloads outside the build tree so they survive
-# clean builds and can be shared across build directories.
-set(FETCHCONTENT_BASE_DIR ${CMAKE_SOURCE_DIR}/external CACHE PATH
-    "Directory where FetchContent stores downloaded sources")
+# FETCHCONTENT_BASE_DIR is deliberately left at its default, inside each build
+# tree. FetchContent keeps a dependency's *build* and sub-build directories
+# there as well as its sources, so pointing several build trees at one shared
+# directory makes them share googletest's and pugixml's object files and
+# generated projects: whichever tree configured last owns them, and a Debug,
+# sanitizer or MSVC tree silently links what another tree built. To reuse a
+# local checkout of a dependency instead of fetching it, pass
+# -DFETCHCONTENT_SOURCE_DIR_<NAME>=<path> (e.g. FETCHCONTENT_SOURCE_DIR_EIGEN),
+# which shares sources only.
 
 # All project options are CRAM_-prefixed so they don't collide with the
 # options of packages pulled in via FetchContent (Eigen, googletest, ENDFtk),
@@ -356,13 +361,13 @@ if(CRAM_WITH_CHAIN_XML)
   add_executable(vera_report validation/report/vera_report.cpp)
   target_link_libraries(vera_report PRIVATE cram cram_warning_flags)
   target_compile_definitions(vera_report PRIVATE
-    CRAM_VALIDATION_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/validation/data")
+    CRAM_VALIDATION_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/validation/data")
 
-  set(CRAM_REPORT_DIR "${CMAKE_BINARY_DIR}/validation")
+  set(CRAM_REPORT_DIR "${PROJECT_BINARY_DIR}/validation")
   find_package(Python3 COMPONENTS Interpreter QUIET)
   if(Python3_Interpreter_FOUND)
     set(_cram_render
-      COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/validation/report/render_report.py"
+      COMMAND ${Python3_EXECUTABLE} "${PROJECT_SOURCE_DIR}/validation/report/render_report.py"
               "${CRAM_REPORT_DIR}/vera_report.json"
               -o "${CRAM_REPORT_DIR}/vera_validation_report.html")
   else()
@@ -374,7 +379,7 @@ if(CRAM_WITH_CHAIN_XML)
   add_custom_target(validation-report
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CRAM_REPORT_DIR}"
     COMMAND $<TARGET_FILE:vera_report>
-            --data "${CMAKE_SOURCE_DIR}/tests/validation/data"
+            --data "${PROJECT_SOURCE_DIR}/tests/validation/data"
             --out "${CRAM_REPORT_DIR}/vera_report.json"
     ${_cram_render}
     DEPENDS vera_report
@@ -415,7 +420,7 @@ if(CRAM_ENABLE_COVERAGE)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   find_program(GCOV_EXE NAMES gcov REQUIRED)
 
-  set(CRAM_COVERAGE_INFO_FILE "${CMAKE_BINARY_DIR}/coverage/coverage.info")
+  set(CRAM_COVERAGE_INFO_FILE "${PROJECT_BINARY_DIR}/coverage/coverage.info")
 
   # Include test sources as gcov inputs so coverage of header-only inline
   # functions (which only get instantiated in test TUs) is captured. The
@@ -434,7 +439,7 @@ if(CRAM_ENABLE_COVERAGE)
 
   add_custom_target(coverage-reset
     COMMAND "${CMAKE_COMMAND}"
-      -DCRAM_BUILD_DIR=${CMAKE_BINARY_DIR}
+      -DCRAM_BUILD_DIR=${PROJECT_BINARY_DIR}
       -DCRAM_COVERAGE_INFO_FILE=${CRAM_COVERAGE_INFO_FILE}
       -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ResetCoverage.cmake"
     COMMENT "Removing stale coverage artifacts"
@@ -442,19 +447,19 @@ if(CRAM_ENABLE_COVERAGE)
 
   add_custom_target(coverage
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/coverage"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${PROJECT_BINARY_DIR}/coverage"
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/gcov_to_lcov.py"
-      --build-dir "${CMAKE_BINARY_DIR}"
+      --build-dir "${PROJECT_BINARY_DIR}"
       --source-dir "${CMAKE_CURRENT_SOURCE_DIR}"
-      --object-dir "${CMAKE_BINARY_DIR}"
+      --object-dir "${PROJECT_BINARY_DIR}"
       --output "${CRAM_COVERAGE_INFO_FILE}"
       "--gcov=${GCOV_EXE}"
-      --exclude "${FETCHCONTENT_BASE_DIR}"
+      --exclude "${CMAKE_BINARY_DIR}/_deps"
       --exclude "${CMAKE_CURRENT_SOURCE_DIR}/tests"
       --exclude "${CMAKE_CURRENT_SOURCE_DIR}/cram-apps"
       ${_coverage_source_args}
     BYPRODUCTS "${CRAM_COVERAGE_INFO_FILE}"
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
     COMMENT "Generating LCOV coverage at ${CRAM_COVERAGE_INFO_FILE}"
     COMMAND_EXPAND_LISTS
     DEPENDS coverage-reset
@@ -560,9 +565,9 @@ if(CPPCHECK_EXE)
     COMMAND ${CPPCHECK_EXE}
             --enable=warning,style,performance,portability
             --std=c++20 --language=c++ --inline-suppr --error-exitcode=1
-            -I ${CMAKE_SOURCE_DIR}
+            -I ${PROJECT_SOURCE_DIR}
             --suppress=missingIncludeSystem
             --suppress=normalCheckLevelMaxBranches
-            ${CMAKE_SOURCE_DIR}/cram
+            ${PROJECT_SOURCE_DIR}/cram
     COMMENT "Running cppcheck static analysis")
 endif()

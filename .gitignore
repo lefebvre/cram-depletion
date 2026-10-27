@@ -3,7 +3,7 @@ build/
 build-*/
 cmake-build-*/
 
-# FetchContent cache (see FETCHCONTENT_BASE_DIR in CMakeLists.txt)
+# Former shared FetchContent cache; dependencies now fetch into each build tree
 external/
 
 # CMake artifacts
