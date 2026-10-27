@@ -27,6 +27,19 @@ TEST(Chain, AddIsIdempotent) {
   EXPECT_EQ(c.size(), 2);
 }
 
+// A Zai the key cannot hold would alias a registered nuclide's index: Zai{1,2,10}
+// packs to the same key as Zai{1,3,0}.
+TEST(Chain, UnrepresentableZaiIsRefusedAndNeverAliases) {
+  DepletionChain c;
+  const int real = c.add({1, 3, 0});
+  EXPECT_EQ(c.indexOf({1, 3, 0}), real);
+  EXPECT_EQ(c.indexOf({1, 2, 10}), -1);
+  EXPECT_THROW(c.add({1, 2, 10}), std::invalid_argument);
+  EXPECT_THROW(c.add({92, 1000, 0}), std::invalid_argument);
+  EXPECT_THROW(c.add({2, 0, 0}), std::invalid_argument);
+  EXPECT_EQ(c.size(), 1);
+}
+
 TEST(Chain, IndexOfAbsent) {
   DepletionChain c;
   c.add({1, 1, 0});

@@ -1,14 +1,15 @@
 #include "cram/chain_xml.hpp"
 
-#include <algorithm>
 #include <array>
 #include <cctype>
 #include <charconv>
 #include <cstdio>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 
@@ -55,26 +56,36 @@ std::optional<Zai> parseNuclideName(std::string_view name) {
   if (z < 0)
     return std::nullopt;
 
-  // Mass number digits follow the symbol.
+  // Every character after the symbol must belong to "<mass>[_m<level>]". A
+  // lenient parse would turn "U235x" into U-235, "U235_mx" into the ground
+  // state, and an overflowing mass number into A = 0 -- each a plausible
+  // nuclide that matches nothing the file meant.
+  const auto parseDigits = [&name](std::size_t from, std::size_t to, int& out) {
+    if (from == to)
+      return false;
+    const auto [ptr, ec] = std::from_chars(name.data() + from, name.data() + to, out);
+    return ec == std::errc() && ptr == name.data() + to;
+  };
   std::size_t j = i;
   while (j < name.size() && (std::isdigit(static_cast<unsigned char>(name[j])) != 0))
     ++j;
-  if (j == i)
-    return std::nullopt;
   int a = 0;
-  std::from_chars(name.data() + i, name.data() + j, a);
+  if (!parseDigits(i, j, a))
+    return std::nullopt;
 
-  // Optional metastable suffix "_m<level>".
   int iso = 0;
-  if (j < name.size() && name[j] == '_') {
-    std::size_t k = j + 1;
-    if (k < name.size() && (name[k] == 'm' || name[k] == 'M'))
-      ++k;
-    if (k < name.size())
-      std::from_chars(name.data() + k, name.data() + name.size(), iso);
+  if (j < name.size()) {
+    std::size_t k = j;
+    if (name[k++] != '_' || k >= name.size() || (name[k] != 'm' && name[k] != 'M'))
+      return std::nullopt;
+    if (!parseDigits(k + 1, name.size(), iso))
+      return std::nullopt;
   }
 
-  return Zai{.z = z, .a = a, .i = iso};
+  const Zai zai{.z = z, .a = a, .i = iso};
+  if (!zai.representable())
+    return std::nullopt;
+  return zai;
 }
 
 #ifdef CRAM_WITH_CHAIN_XML
@@ -93,15 +104,53 @@ std::vector<std::string> tokenize(const char* text) {
   return out;
 }
 
+// The whole of `text` as a double, or empty if any of it is not part of the
+// number. std::from_chars rather than std::stod or pugixml's as_double(),
+// both of which go through strtod and so read "0.5" as 0 in a host process
+// that has set a comma-decimal locale.
+std::optional<double> parseDouble(std::string_view text) {
+  while (!text.empty() && (std::isspace(static_cast<unsigned char>(text.front())) != 0))
+    text.remove_prefix(1);
+  while (!text.empty() && (std::isspace(static_cast<unsigned char>(text.back())) != 0))
+    text.remove_suffix(1);
+  if (!text.empty() && text.front() == '+')
+    text.remove_prefix(1);  // from_chars takes '-' but not '+'
+  double value = 0.0;
+  const auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), value);
+  if (text.empty() || ec != std::errc() || ptr != text.data() + text.size())
+    return std::nullopt;
+  return value;
+}
+
+[[noreturn]] void throwMalformed(const Zai& owner, std::string_view what, std::string_view text) {
+  throw std::runtime_error("cram: depletion_chain XML: " + owner.str() + " has a malformed " +
+                           std::string(what) + " '" + std::string(text) + "'");
+}
+
+// A numeric attribute of an element belonging to `owner`: `fallback` when the
+// attribute is absent, and a throw when it is present but not a number. A
+// malformed value is a damaged file, not an entry to skip: unlike an
+// unrecognized name, there is no reading of it that keeps the chain right.
+double numberAttribute(const pugi::xml_node& node, const char* name, double fallback,
+                       const Zai& owner) {
+  const pugi::xml_attribute attr = node.attribute(name);
+  if (!attr)
+    return fallback;
+  const std::optional<double> v = parseDouble(attr.value());
+  if (!v)
+    throwMalformed(owner, std::string(name) + " attribute", attr.value());
+  return *v;
+}
+
 void parseDecay(const pugi::xml_node& nuc, const Zai& parent, DepletionChain& chain,
                 ChainXmlDiagnostics& diag) {
-  const double halfLife = nuc.attribute("half_life").as_double(0.0);
+  const double halfLife = numberAttribute(nuc, "half_life", 0.0, parent);
   if (halfLife <= 0.0)
     return;  // stable (or no half-life given)
 
   DecayData d{.halfLife = halfLife};
   for (pugi::xml_node dn : nuc.children("decay")) {
-    const double branching = dn.attribute("branching_ratio").as_double(0.0);
+    const double branching = numberAttribute(dn, "branching_ratio", 0.0, parent);
     const std::string_view type = dn.attribute("type").as_string();
     const std::string_view target = dn.attribute("target").as_string();
 
@@ -153,17 +202,32 @@ void parseDecay(const pugi::xml_node& nuc, const Zai& parent, DepletionChain& ch
 void parseFissionYields(const pugi::xml_node& nfy, const Zai& parent, DepletionChain& chain,
                         ChainXmlDiagnostics& diag) {
   for (pugi::xml_node fy : nfy.children("fission_yields")) {
-    FissionYields y{.energy = fy.attribute("energy").as_double(0.0)};
+    // Required: an absent energy would read as 0, which is the spontaneous-
+    // fission slot, and so would file a neutron-induced table where no
+    // neutron-induced lookup ever finds it.
+    if (!fy.attribute("energy"))
+      throwMalformed(parent, "fission_yields element", "(no energy attribute)");
+    FissionYields y{.energy = numberAttribute(fy, "energy", 0.0, parent)};
     const auto products = tokenize(fy.child("products").text().get());
     const auto data = tokenize(fy.child("data").text().get());
-    const std::size_t n = std::min(products.size(), data.size());
-    for (std::size_t k = 0; k < n; ++k) {
+    // Each yield belongs to the product in the same position. Pairing the
+    // shorter list against a prefix of the longer would assign yields to the
+    // wrong products if the lists were misaligned anywhere, not only lose the
+    // tail, so a mismatch is a damaged table.
+    if (products.size() != data.size())
+      throwMalformed(parent, "fission_yields table",
+                     std::to_string(products.size()) + " products, " +
+                         std::to_string(data.size()) + " yields");
+    for (std::size_t k = 0; k < products.size(); ++k) {
+      const std::optional<double> yield = parseDouble(data[k]);
+      if (!yield)
+        throwMalformed(parent, "fission yield", data[k]);
       const std::optional<Zai> prod = parseNuclideName(products[k]);
       if (!prod) {
         ++diag.unparsedYieldProducts;
         continue;
       }
-      y.products.emplace_back(*prod, std::stod(data[k]));
+      y.products.emplace_back(*prod, *yield);
     }
     chain.addFissionYields(parent, std::move(y));
   }
@@ -217,8 +281,8 @@ void parseReactions(const pugi::xml_node& nuc, const Zai& parent, DepletionChain
     out.push_back(ChainReaction{.parent = parent,
                                 .type = *type,
                                 .target = product,
-                                .q = rn.attribute("Q").as_double(0.0),
-                                .branching = rn.attribute("branching_ratio").as_double(1.0)});
+                                .q = numberAttribute(rn, "Q", 0.0, parent),
+                                .branching = numberAttribute(rn, "branching_ratio", 1.0, parent)});
   }
 }
 

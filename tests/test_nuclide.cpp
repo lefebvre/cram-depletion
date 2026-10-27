@@ -22,6 +22,22 @@ TEST(Zai, Equality) {
   EXPECT_FALSE((Zai{54, 135, 0}) == (Zai{55, 135, 0}));
 }
 
+// {1, 2, 10} and {1, 3, 0} pack to the same key; equality must still tell them
+// apart, and representable() must flag the one the key cannot hold.
+TEST(Zai, AliasedKeysAreNotEqualAndNotRepresentable) {
+  const Zai aliased{1, 2, 10};
+  const Zai real{1, 3, 0};
+  ASSERT_EQ(aliased.key(), real.key());
+  EXPECT_FALSE(aliased == real);
+  EXPECT_FALSE(aliased.representable());
+  EXPECT_TRUE(real.representable());
+  EXPECT_TRUE((Zai{0, 1, 0}).representable());  // the neutron pseudo-nuclide
+  EXPECT_FALSE((Zai{92, 1000, 0}).representable());
+  EXPECT_FALSE((Zai{92, 0, 0}).representable());
+  EXPECT_FALSE((Zai{-1, 4, 0}).representable());
+  EXPECT_FALSE((Zai{92, 235, -1}).representable());
+}
+
 TEST(Zai, StringForm) {
   EXPECT_EQ((Zai{53, 135, 0}).str(), "53-135");
   EXPECT_EQ((Zai{43, 99, 1}).str(), "43-99m1");
