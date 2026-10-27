@@ -111,6 +111,49 @@ TEST(ChainXml, ParseNuclideName) {
   EXPECT_FALSE(parseNuclideName("").has_value());
 }
 
+// Each of these used to parse as a plausible nuclide the file never named.
+TEST(ChainXml, ParseNuclideNameRejectsAnythingBeyondTheGrammar) {
+  EXPECT_FALSE(parseNuclideName("U235x").has_value());      // trailing junk
+  EXPECT_FALSE(parseNuclideName("U235_").has_value());      // empty suffix
+  EXPECT_FALSE(parseNuclideName("U235_m").has_value());     // no level
+  EXPECT_FALSE(parseNuclideName("U235_mx").has_value());    // non-numeric level
+  EXPECT_FALSE(parseNuclideName("U235_m1x").has_value());   // junk after level
+  EXPECT_FALSE(parseNuclideName("U235_x1").has_value());    // not a metastable tag
+  EXPECT_FALSE(parseNuclideName("U99999999999").has_value());  // mass overflows int
+  EXPECT_FALSE(parseNuclideName("U1000").has_value());      // mass beyond the key
+  EXPECT_FALSE(parseNuclideName("U0").has_value());         // no nuclide has A = 0
+  EXPECT_FALSE(parseNuclideName("Am242_m10").has_value());  // level beyond the key
+  EXPECT_EQ(parseNuclideName("Am242_M1"), (Zai{95, 242, 1}));
+}
+
+TEST(ChainXml, MalformedNumbersAndTablesThrow) {
+  const auto load = [](const std::string& body) {
+    DepletionChain chain;
+    loadDepletionChainXmlString(chain, "<depletion_chain>" + body + "</depletion_chain>");
+  };
+  // Well-formed, to show the throws below come from the one damaged value.
+  EXPECT_NO_THROW(load(R"(<nuclide name="I135" half_life=" +23652.0 "/>)"));
+  EXPECT_THROW(load(R"(<nuclide name="I135" half_life="23652.0s"/>)"), std::runtime_error);
+  EXPECT_THROW(load(R"(<nuclide name="I135" half_life="1e9999"/>)"), std::runtime_error);
+  EXPECT_THROW(load(R"(<nuclide name="I135" half_life="1.0">
+                         <decay type="beta-" target="Xe135" branching_ratio="0,9"/></nuclide>)"),
+               std::runtime_error);
+  EXPECT_THROW(load(R"(<nuclide name="U235"><reaction type="fission" Q="abc"/></nuclide>)"),
+               std::runtime_error);
+  EXPECT_THROW(load(R"(<nuclide name="U235"><neutron_fission_yields>
+                         <fission_yields energy="0.0253"><products>Xe135 I135</products>
+                         <data>0.5</data></fission_yields></neutron_fission_yields></nuclide>)"),
+               std::runtime_error);
+  EXPECT_THROW(load(R"(<nuclide name="U235"><neutron_fission_yields>
+                         <fission_yields energy="0.0253"><products>Xe135</products>
+                         <data>half</data></fission_yields></neutron_fission_yields></nuclide>)"),
+               std::runtime_error);
+  EXPECT_THROW(load(R"(<nuclide name="U235"><neutron_fission_yields>
+                         <fission_yields><products>Xe135</products>
+                         <data>0.5</data></fission_yields></neutron_fission_yields></nuclide>)"),
+               std::runtime_error);
+}
+
 TEST(ChainXml, ElementSymbol) {
   EXPECT_EQ(elementSymbol(92), "U");
   EXPECT_EQ(elementSymbol(54), "Xe");

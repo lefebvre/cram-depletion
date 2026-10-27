@@ -55,7 +55,8 @@
 namespace cram {
 
 // Parse a GND-style nuclide name ("U235", "Am242_m1", "Th231") into a Zai.
-// Empty if the element symbol or mass cannot be recognized.
+// Empty unless the whole name is an element symbol, a mass number and an
+// optional "_m<level>", and the result is Zai::representable().
 std::optional<Zai> parseNuclideName(std::string_view name);
 
 // Element symbol for proton number z (1..118), or empty string if out of range.
@@ -110,8 +111,11 @@ struct ChainXmlDiagnostics {
 // "Nothing". A target that is absent or spelled "Nothing" stays untracked,
 // which is what the file is asking for.
 //
-// Throws std::runtime_error if the file cannot be opened or parsed, or if the
-// root element is not <depletion_chain>.
+// Throws std::runtime_error if the file cannot be opened or parsed, if the root
+// element is not <depletion_chain>, or if the data is damaged: a numeric value
+// that is not a number, a <fission_yields> table with no energy, or one whose
+// products and data differ in length. Names that do not parse are not damage
+// in this sense -- they are counted in ChainXmlDiagnostics and skipped.
 std::vector<ChainReaction> loadDepletionChainXml(DepletionChain& chain, const std::string& path,
                                                  ChainXmlDiagnostics* diagnostics = nullptr);
 

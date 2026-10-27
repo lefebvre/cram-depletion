@@ -88,10 +88,12 @@ struct FissionYields {
 
 class DepletionChain {
 public:
-  // Register a nuclide (idempotent) and return its matrix index.
+  // Register a nuclide (idempotent) and return its matrix index. Throws
+  // std::invalid_argument for a Zai that is not representable() -- one whose
+  // key would alias another nuclide's.
   int add(const Zai& z);
 
-  // Look up an existing nuclide; returns -1 if absent.
+  // Look up an existing nuclide; returns -1 if absent or not representable().
   int indexOf(const Zai& z) const;
 
   int size() const { return static_cast<int>(nuclides_.size()); }

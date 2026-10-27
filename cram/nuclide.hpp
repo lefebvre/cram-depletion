@@ -31,10 +31,19 @@ struct Zai {
   int a;      // mass number
   int i = 0;  // isomeric state (LISO/RFS); 0 = ground state
 
+  // The packing above has one decimal digit for I and three for A, so only
+  // 0 <= i <= 9 and a <= 999 give a key no other Zai shares: {1, 2, 10} and
+  // {1, 3, 0} both pack to 10030. A is also at least 1, since no nuclide has
+  // A = 0. DepletionChain::add() refuses a Zai outside this range rather than
+  // let it alias another nuclide's matrix index.
+  constexpr bool representable() const { return z >= 0 && a >= 1 && a <= 999 && i >= 0 && i <= 9; }
+
   constexpr std::int64_t key() const {
     return (std::int64_t(z) * 10000) + (std::int64_t(a) * 10) + i;
   }
-  constexpr bool operator==(const Zai& o) const { return key() == o.key(); }
+  // Compares the fields, not key(), so two Zai that alias the same key are
+  // still unequal.
+  constexpr bool operator==(const Zai& o) const { return z == o.z && a == o.a && i == o.i; }
 
   std::string str() const {
     std::string s = std::to_string(z) + "-" + std::to_string(a);

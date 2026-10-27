@@ -6,12 +6,18 @@
 #include <cstdio>
 #include <limits>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
 namespace cram {
 
 int DepletionChain::add(const Zai& z) {
+  if (!z.representable())
+    throw std::invalid_argument("cram: nuclide " + z.str() +
+                                " is outside the range a ZAI key can hold "
+                                "(Z >= 0, 1 <= A <= 999, 0 <= I <= 9)");
   auto it = index_.find(z.key());
   if (it != index_.end())
     return it->second;
@@ -23,6 +29,8 @@ int DepletionChain::add(const Zai& z) {
 }
 
 int DepletionChain::indexOf(const Zai& z) const {
+  if (!z.representable())
+    return -1;  // its key would alias a registered nuclide's
   auto it = index_.find(z.key());
   return it == index_.end() ? -1 : it->second;
 }
