@@ -1,12 +1,13 @@
 // Example driver for the CRAM depletion library.
 //
 //   ./deplete                      -> runs a self-contained decay demo (no data files)
-//   ./deplete <decay.endf> [t_sec] -> loads ENDF decay data (needs -DWITH_ENDFTK)
+//   ./deplete <decay.endf> [t_sec] -> loads ENDF decay data (needs -DCRAM_WITH_ENDFTK=ON)
 //   ./deplete --version            -> prints the library version and exits
 //
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <string>
 
 #include "cram/chain.hpp"
@@ -80,19 +81,20 @@ int main(int argc, char** argv) {
   }
 
   DepletionChain chain;
-  int n = loadDecayData(chain, argv[1]);
+  int n = 0;
+  try {
+    n = loadDecayData(chain, argv[1]);
+  } catch (const std::exception& e) {
+    // Includes a binary built without CRAM_WITH_ENDFTK, whose loaders throw.
+    std::fprintf(stderr, "%s\n", e.what());
+    return 1;
+  }
   if (n == 0) {
-#ifdef WITH_ENDFTK
     std::printf(
         "No MT457 (decay) sections found in '%s'.\n"
         "This driver expects an ENDF/B-VIII decay sublibrary file; NFY (MT454/459)\n"
         "and other tapes are not handled here.\n",
         argv[1]);
-#else
-    std::printf(
-        "This binary was built without WITH_ENDFTK, so ENDF files cannot be read.\n"
-        "Rebuild with -DWITH_ENDFTK=ON.\n");
-#endif
     return 1;
   }
   std::printf("Loaded decay data for %d nuclides (%d in chain).\n", n, chain.size());

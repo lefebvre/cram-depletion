@@ -326,7 +326,7 @@ if(CRAM_WITH_ENDFTK)
     GIT_SHALLOW    TRUE
     SYSTEM)
   FetchContent_MakeAvailable(ENDFtk)
-  target_compile_definitions(cram PUBLIC WITH_ENDFTK)
+  target_compile_definitions(cram PUBLIC CRAM_WITH_ENDFTK)
   target_link_libraries(cram PUBLIC njoy::ENDFtk)
   if(MSVC)
     # ENDFtk's parsing templates convert size_t to int inside MSVC's own STL

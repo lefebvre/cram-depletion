@@ -2,10 +2,12 @@
 //
 // Ingestion of ENDF/B-VIII data into a DepletionChain using njoy/ENDFtk.
 //
-// Build with -DWITH_ENDFTK to enable. Without it these are no-ops so the CRAM
-// core and tests build with only Eigen. The ENDFtk accessor names used in the
-// implementation have been verified against the ENDFtk source tree and a real
-// build (see tests/integration).
+// Compiled only with CRAM_WITH_ENDFTK (it needs njoy/ENDFtk). Without it the
+// loaders throw std::runtime_error, as the OpenMC chain reader's do, so a caller
+// built without the reader finds out at the call rather than by a chain that
+// silently stayed empty. The ENDFtk accessor names used in the implementation
+// have been verified against the ENDFtk source tree and a real build (see
+// tests/integration).
 //
 // ENDF layout used here:
 //   * Decay sublibrary:        MF8 / MT457   (half-life, decay modes, BRs)

@@ -1,6 +1,6 @@
 // Integration test: exercises the real ENDFtk-backed reader against a known
 // MT457 decay section (Am-242m) and a real MT454 fission-yield file (Pu-239).
-// Built only with WITH_ENDFTK.
+// Built only with CRAM_WITH_ENDFTK.
 #include <gtest/gtest.h>
 
 #include <cmath>
