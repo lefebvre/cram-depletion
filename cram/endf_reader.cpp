@@ -38,6 +38,7 @@ int loadFissionYields(DepletionChain& /*chain*/, const std::string& path, bool /
 #include <cmath>
 #include <iterator>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -119,9 +120,22 @@ int loadFissionYields(DepletionChain& chain, const std::string& path, bool useCu
     if (!material.hasSection(8, mt))
       continue;
 
+    // The fissioning nuclide's isomeric state. MT454/459's HEAD record holds
+    // only ZA, so it has to come from the material's MF1/MT451 header (LISO):
+    // without it, Am-242m1's yields would be filed under Am-242 ground --
+    // which then holds two tables at the same energy -- and Am-242m would have
+    // none. Refuse a material without the header rather than guess the ground
+    // state.
+    if (!material.hasSection(1, 451))
+      throw std::runtime_error("cram: ENDF material " + std::to_string(material.MAT()) +
+                               " in '" + path +
+                               "' has fission yields but no MF1/MT451, so the "
+                               "isomeric state of its parent is unknown");
+    const int parentState = static_cast<int>(material.section(1, 451).parse<1, 451>().LISO());
+
     // section::Type<8,454> and <8,459> share the same fission-yield layout.
     auto parseAndLoad = [&](const auto& section) {
-      const Zai par = zaiFromZA(section.ZA(), 0);
+      const Zai par = zaiFromZA(section.ZA(), parentState);
       for (const auto& block : section.yields()) {
         FissionYields fy{.energy = block.incidentEnergy()};
 

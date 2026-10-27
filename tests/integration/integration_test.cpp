@@ -4,6 +4,10 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <vector>
 
 #include "cram/chain.hpp"
 #include "cram/endf_reader.hpp"
@@ -66,4 +70,35 @@ TEST(EndfReaderIntegration, Pu239ThermalFissionYields) {
   chain.addFissionSource(t, pu239, /*fissionRate=*/1e-3, /*energy=*/0.0253);
   auto A = chain.finalize(t);
   EXPECT_GT(A.nonZeros(), 1);
+}
+
+// The parent's isomeric state lives in MF1/MT451 (LISO), not in MT454's HEAD
+// record. Rewrite LISO in a copy of the Pu-239 tape to 1, as an Am-242m1 tape
+// carries it, and the yields must land on the isomer, not on the ground state.
+TEST(EndfReaderIntegration, IsomerParentYieldsAreFiledUnderTheIsomer) {
+  std::ifstream in("data/nfy-Pu239.endf");
+  ASSERT_TRUE(in.good());
+  std::vector<std::string> lines;
+  for (std::string line; std::getline(in, line);)
+    lines.push_back(line);
+  // Line 3 is MT451's second record: ELIS, STA, LIS, LISO, 0, NFOR in 11-column
+  // fields, so LISO occupies columns 34-44.
+  ASSERT_GT(lines.size(), 3u);
+  ASSERT_GE(lines[2].size(), 75u);
+  ASSERT_EQ(lines[2].substr(66, 9), "9437 1451") << "MT451's second record moved";
+  lines[2].replace(33, 11, "          1");
+
+  const std::filesystem::path copy =
+      std::filesystem::temp_directory_path() / "cram_nfy_Pu239m1.endf";
+  {
+    std::ofstream out(copy);
+    for (const std::string& line : lines)
+      out << line << '\n';
+  }
+  DepletionChain chain;
+  const int n = loadFissionYields(chain, copy.string());
+  std::filesystem::remove(copy);
+  ASSERT_EQ(n, 1);
+  EXPECT_NE(chain.nearestYields({94, 239, 1}, 0.0253), nullptr);
+  EXPECT_EQ(chain.nearestYields({94, 239, 0}, 0.0253), nullptr);
 }
