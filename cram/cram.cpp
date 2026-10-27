@@ -1,9 +1,11 @@
 #include "cram/cram.hpp"
 
 #include <Eigen/SparseLU>
+#include <cmath>
 #include <complex>
 #include <cstddef>
 #include <stdexcept>
+#include <string>
 
 #include "cram/cram_poles.hpp"
 
@@ -46,10 +48,17 @@ Eigen::VectorXd ipfCram(const Eigen::SparseMatrix<double>& Araw, const Eigen::Ve
 
 }  // namespace
 
+void requireTimeStep(double dt) {
+  if (!std::isfinite(dt) || dt < 0.0)
+    throw std::invalid_argument("cram: the time step must be finite and non-negative, got " +
+                                std::to_string(dt));
+}
+
 Eigen::VectorXd cramSolve(const Eigen::SparseMatrix<double>& A, const Eigen::VectorXd& n0,
                           double dt, CramOrder order) {
   if (A.rows() != A.cols() || A.rows() != n0.size())
     throw std::invalid_argument("cram: A must be square with rows() == n0.size()");
+  requireTimeStep(dt);
 
   // exp(A * 0) = I, and exp(0 * dt) = I — return n0 unchanged either way.
   if (dt == 0.0 || A.nonZeros() == 0)

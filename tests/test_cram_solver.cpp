@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -114,6 +115,17 @@ TEST(CramSolver, NonSquareThrows) {
   Eigen::SparseMatrix<double> A(2, 3);
   CramSolver solver;
   EXPECT_THROW(solver.prepare(A, 1.0), std::invalid_argument);
+  EXPECT_FALSE(solver.prepared());
+}
+
+TEST(CramSolver, NegativeOrNonFiniteTimeStepThrows) {
+  Eigen::SparseMatrix<double> A(1, 1);
+  A.insert(0, 0) = -1.0;
+  CramSolver solver;
+  for (double dt : {-1.0, std::nan(""), std::numeric_limits<double>::infinity()}) {
+    EXPECT_THROW(solver.prepare(A, dt), std::invalid_argument) << dt;
+    EXPECT_THROW(solver.beginPrepare(A, dt), std::invalid_argument) << dt;
+  }
   EXPECT_FALSE(solver.prepared());
 }
 

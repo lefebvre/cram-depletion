@@ -3,6 +3,7 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -185,6 +186,21 @@ TEST(Cram, InvalidShapeThrows) {
   Eigen::VectorXd mismatched(2);
   mismatched << 1.0, 2.0;
   EXPECT_THROW(cramSolve(square, mismatched, 1.0, CramOrder::CRAM48), std::invalid_argument);
+}
+
+// A negative step puts the eigenvalues where CRAM is not an approximation of
+// exp at all. Rejected even for an empty matrix, whose dt == 0 shortcut would
+// otherwise return n0 without looking at the step.
+TEST(Cram, NegativeOrNonFiniteTimeStepThrows) {
+  Eigen::SparseMatrix<double> A(1, 1);
+  A.insert(0, 0) = -1.0;
+  Eigen::VectorXd n0(1);
+  n0 << 1.0;
+  const Eigen::SparseMatrix<double> empty(1, 1);
+  for (double dt : {-1.0, std::nan(""), std::numeric_limits<double>::infinity()}) {
+    EXPECT_THROW(cramSolve(A, n0, dt), std::invalid_argument) << dt;
+    EXPECT_THROW(cramSolve(empty, n0, dt), std::invalid_argument) << dt;
+  }
 }
 
 TEST(Cram, Orders16And48Agree) {

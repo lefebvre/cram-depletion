@@ -36,6 +36,7 @@ void CramSolver::recordPattern(const Eigen::SparseMatrix<cd>& m) {
 void CramSolver::beginPrepare(const Eigen::SparseMatrix<double>& A, double dt) {
   if (A.rows() != A.cols())
     throw std::invalid_argument("cram: CramSolver::prepare requires square A");
+  requireTimeStep(dt);
 
   n_ = static_cast<int>(A.rows());
   prepared_ = false;

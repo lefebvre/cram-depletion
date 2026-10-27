@@ -75,7 +75,9 @@ protected:
   // region alive at once.
   Eigen::VectorXd expm(const Eigen::SparseMatrix<double>& M, double dt, const Eigen::VectorXd& v) {
     // As cramSolve(): exp(A*0) = I and exp(0*dt) = I, and neither is worth a
-    // factorization.
+    // factorization. The step is checked first so an empty M cannot wave a
+    // negative or non-finite dt through.
+    requireTimeStep(dt);
     if (dt == 0.0 || M.nonZeros() == 0)
       return v;
     solver_.prepare(M, dt);

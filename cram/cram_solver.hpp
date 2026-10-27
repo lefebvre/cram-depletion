@@ -43,8 +43,9 @@ public:
   // cheaper than the analysis it avoids. A mismatch is not an error: it simply
   // falls back to a full analysis.
   //
-  // Throws std::invalid_argument if A is not square; std::runtime_error if
-  // any pole's factorization fails (singular matrix, NaNs in A, etc.).
+  // Throws std::invalid_argument if A is not square or dt fails
+  // requireTimeStep(); std::runtime_error if any pole's factorization fails
+  // (singular matrix, NaNs in A, etc.).
   void prepare(const Eigen::SparseMatrix<double>& A, double dt);
 
   // True if the most recent prepare() was able to reuse the symbolic analysis

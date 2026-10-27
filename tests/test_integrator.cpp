@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -191,5 +192,19 @@ TEST(Integrator, ZeroLengthIntervalIsTheIdentity) {
     const Eigen::VectorXd y = deplete(*b, n0, without).n.back();
     ASSERT_TRUE(x.allFinite()) << integratorName(kind);
     EXPECT_LT((x - y).norm(), 1e-12 * y.norm()) << integratorName(kind);
+  }
+}
+
+TEST(Integrator, NegativeOrNonFiniteIntervalThrows) {
+  DepletionChain chain = buildPinChain();
+  DepletionSystem sys(chain);
+  configurePinReactions(sys);
+  const Eigen::VectorXd n0 = initialPinComposition(chain);
+  sys.setConstantFlux(1.0e14);
+  for (IntegratorKind kind : kAllKinds) {
+    for (double dt : {-kDay, std::nan(""), std::numeric_limits<double>::infinity()}) {
+      auto integ = makeIntegrator(kind, sys.matrixBuilder());
+      EXPECT_THROW(integ->step(n0, dt), std::invalid_argument) << integratorName(kind);
+    }
   }
 }
