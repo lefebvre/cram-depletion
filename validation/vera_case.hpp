@@ -189,6 +189,45 @@ inline std::vector<Eigen::VectorXd> marchPredictor(const VeraCase& c) {
   return traj;
 }
 
+// A constant-power reference trajectory for one integrator, written by
+// validation/openmc/generate_constant_power_refs.py into <case>/constant_power/.
+// The material there has a volume of 1 cm^3, so the densities are atom counts
+// like refDensity's and `power` is the fission power those counts produce.
+struct ConstantPowerReference {
+  double power = 0.0;                    // W
+  std::vector<Eigen::VectorXd> density;  // step 0..N, chain-indexed
+  std::vector<char> reported;            // as VeraCase::reported
+};
+
+// Empty when the case has no reference for `scheme` (the integratorName()
+// spelling); the generator is offline and its output optional.
+inline std::optional<ConstantPowerReference> loadConstantPowerReference(const VeraCase& c,
+                                                                        const fs::path& root,
+                                                                        const std::string& scheme) {
+  const fs::path dir = root / "constant_power";
+  if (!fs::exists(dir / "power.csv") || !fs::exists(dir / (scheme + ".csv")))
+    return std::nullopt;
+  ConstantPowerReference ref;
+  const auto power = readCsv(dir / "power.csv", 1);
+  if (power.empty())
+    return std::nullopt;
+  ref.power = std::stod(power.front()[0]);
+  ref.density.assign(static_cast<std::size_t>(c.steps) + 1, Eigen::VectorXd::Zero(c.chain.size()));
+  ref.reported.assign(static_cast<std::size_t>(c.chain.size()), 0);
+  for (const auto& row : readCsv(dir / (scheme + ".csv"), 3)) {
+    const int step = std::stoi(row[0]);
+    const std::optional<cram::Zai> z = cram::parseNuclideName(row[1]);
+    if (!z || step < 0 || step > c.steps)
+      continue;
+    const int idx = c.chain.indexOf(*z);
+    if (idx >= 0) {
+      ref.density[static_cast<std::size_t>(step)](idx) = std::stod(row[2]);
+      ref.reported[static_cast<std::size_t>(idx)] = 1;
+    }
+  }
+  return ref;
+}
+
 // The benchmark's nuclides of interest: the actinides and fission products the
 // VERA depletion benchmark reports (Yu & Forget, Ann. Nucl. Energy 170 (2022)
 // 108973). Shared so the regression test and the validation report agree on
