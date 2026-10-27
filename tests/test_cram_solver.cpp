@@ -9,8 +9,11 @@
 #include <thread>
 #include <vector>
 
+#include "acyclic_chain.hpp"
 #include "bateman.hpp"
 #include "cram/cram_solver.hpp"
+#include "cram/fill_ordering_internal.hpp"
+#include "cyclic_chain.hpp"
 
 using namespace cram;
 using cram_test::batemanLinearChain;
@@ -316,4 +319,46 @@ TEST(CramSolver, LongMarchMatchesFreeFunction) {
       ASSERT_NEAR(cached(i), direct(i), tol) << "step " << s << ", index " << i;
     }
   }
+}
+
+// The ordering both solvers factorize under. Whatever it chooses must be a
+// permutation, and it must put the matrix in block lower-triangular form --
+// that structure is the whole reason for it. For an acyclic decay matrix every
+// block is a single nuclide, so the permuted matrix is lower triangular
+// outright and factorizes with no fill.
+TEST(FillOrdering, IsAPermutationToBlockLowerTriangularForm) {
+  const auto blockLowerTriangular = [](const Eigen::SparseMatrix<double>& A) {
+    const internal::SymmetricPermutation P = internal::fillReducingOrder(A);
+    const auto n = static_cast<std::size_t>(A.rows());
+    std::vector<int> seen(n, 0);
+    for (Eigen::Index i = 0; i < A.rows(); ++i) {
+      const int to = P.indices()(i);
+      if (to < 0 || to >= A.rows() || seen[static_cast<std::size_t>(to)]++ != 0)
+        return -1;  // not a permutation
+    }
+    // Count entries above the diagonal of P A P^T: within a block they are
+    // expected, across blocks they are not, and with no cycles there are none.
+    const Eigen::SparseMatrix<double> B = P * A * P.transpose();
+    int above = 0;
+    for (Eigen::Index c = 0; c < B.outerSize(); ++c)
+      for (Eigen::SparseMatrix<double>::InnerIterator it(B, c); it; ++it)
+        above += it.row() < it.col() ? 1 : 0;
+    return above;
+  };
+
+  EXPECT_EQ(blockLowerTriangular(linearChain({0.07, 0.013, 0.004, 0.0})), 0);
+  EXPECT_EQ(blockLowerTriangular(cram_test::buildAcyclicChain(300).A), 0);
+
+  // A cycle a -> b -> c -> a hanging off a tail d: the three-nuclide block keeps
+  // its internal entries above the diagonal, the tail none.
+  std::vector<Eigen::Triplet<double>> t = {{0, 0, -1.0}, {1, 0, 1.0}, {1, 1, -1.0}, {2, 1, 1.0},
+                                           {2, 2, -1.0}, {0, 2, 0.5}, {3, 2, 0.5}, {3, 3, -1.0}};
+  Eigen::SparseMatrix<double> cyclic(4, 4);
+  cyclic.setFromTriplets(t.begin(), t.end());
+  const int above = blockLowerTriangular(cyclic);
+  EXPECT_GE(above, 1);
+  EXPECT_LE(above, 2);
+
+  const int burnup = blockLowerTriangular(cram_test::buildCyclicChain(400).A);
+  EXPECT_GE(burnup, 0) << "not a permutation";
 }

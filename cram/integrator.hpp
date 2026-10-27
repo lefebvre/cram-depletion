@@ -59,13 +59,14 @@ protected:
   // pattern -- the burnup matrix's, at whatever composition it was built, and
   // any linear combination of those -- so the symbolic analysis inside the pole
   // factorizations is needed once per march, not once per exponential. It is
-  // ~40% of a prepare() at N~1700, and a CF4 step spends five exponentials, so
-  // a 100-step march was re-deriving it 500 times. Measured on the burnup shape
-  // at N=1675 with CRAM48, over a sequence of same-pattern matrices: 20.9 ms
-  // per exponential through cramSolve(), 15.2 ms through the cached solver --
-  // 27% off every exponential after the first. That first prepare() costs more
-  // than one cramSolve() (it pays the analysis and caches K factorizations), so
-  // the trade breaks even at ~10 exponentials -- two CF4 steps.
+  // roughly a third of a prepare() at N~1700, and a CF4 step spends five
+  // exponentials, so a 100-step march would re-derive it 500 times. Measured
+  // on the burnup shape at N=1675 with CRAM48 (MSVC, Release): ~15 ms per
+  // exponential through cramSolve(), ~11 ms through the cached solver over a
+  // sequence of same-pattern matrices -- ~28% off every exponential after the
+  // first. That first prepare() costs ~1 ms more than one cramSolve() (it
+  // caches K factorizations where cramSolve() keeps one), so the trade pays
+  // for itself from the second exponential on.
   //
   // What it costs is memory: a prepared solver holds K complex LU
   // factorizations (24 for CRAM48), a few MB at N~1700, for as long as the
