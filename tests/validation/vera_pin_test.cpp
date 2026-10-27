@@ -181,7 +181,10 @@ TEST_P(VeraPin, ReproducesOpenMCPredictorTrajectory) {
   // file missing half the actinides would still pass it.
   for (const char* wanted : cram_validation::kBenchmarkNuclides) {
     const std::optional<Zai> z = parseNuclideName(wanted);
-    ASSERT_TRUE(z.has_value()) << wanted;
+    if (!z) {  // an explicit branch clang-tidy can follow, unlike ASSERT_TRUE
+      ADD_FAILURE() << wanted << ": not a nuclide name";
+      continue;
+    }
     const int i = c.chain.indexOf(*z);
     EXPECT_TRUE(i >= 0 && ref(i) > 0.0) << wanted << ": absent from the reference data";
   }
