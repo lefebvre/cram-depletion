@@ -181,9 +181,9 @@ void parseDecay(const pugi::xml_node& nuc, const Zai& parent, DepletionChain& ch
     // track SF products as such, and its matrix carries that target like any
     // other daughter, so the branch removes and restores the same atoms.
     // Routing it to the yield tables instead would remove the parent at
-    // branching*lambda and substitute the nearest NEUTRON-induced yield set as
-    // the products -- and where the parent has no table at all, the atoms
-    // would simply vanish.
+    // branching*lambda and, since an OpenMC chain carries no SF table (energy
+    // 0), produce nothing: the atoms would leave the system where OpenMC's
+    // matrix keeps them.
     //
     // rtyp 0 is deliberate: the explicit daughter is what routes the branch,
     // and matrix assembly never derives one from rtyp when a daughter is set.
