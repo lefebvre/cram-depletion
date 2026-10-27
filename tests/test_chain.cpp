@@ -350,12 +350,13 @@ TEST(Reactions, FinalizeSumsDuplicateTriplets) {
   EXPECT_NEAR(M.coeff(0, 0), 4.0, 1e-15);
 }
 
-// When built without -DWITH_ENDFTK, the readers are no-ops that load nothing.
-#ifndef WITH_ENDFTK
-TEST(EndfReader, StubsLoadNothingWithoutEndftk) {
+// When built without -DCRAM_WITH_ENDFTK, the ENDF readers throw rather than
+// leaving the chain silently empty, as the chain XML stubs below do.
+#ifndef CRAM_WITH_ENDFTK
+TEST(EndfReader, StubsThrowWithoutEndftk) {
   DepletionChain c;
-  EXPECT_EQ(loadDecayData(c, "ignored.endf"), 0);
-  EXPECT_EQ(loadFissionYields(c, "ignored.endf"), 0);
+  EXPECT_THROW(loadDecayData(c, "ignored.endf"), std::runtime_error);
+  EXPECT_THROW(loadFissionYields(c, "ignored.endf"), std::runtime_error);
   EXPECT_EQ(c.size(), 0);
 }
 #endif

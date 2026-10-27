@@ -226,7 +226,7 @@ tests/test_adjoint.cpp   duality identity, analytic importance, piecewise marche
 tests/test_sensitivity.cpp finite-difference checks of dR/dlambda and dR/dsigma
 tests/test_chain_xml.cpp OpenMC chain reader (CRAM_WITH_CHAIN_XML only)
 tests/validation/        replay of OpenMC-generated VERA pin data (CRAM_WITH_CHAIN_XML only)
-tests/integration/       real ENDFtk reader vs real ENDF data (WITH_ENDFTK only)
+tests/integration/       real ENDFtk reader vs real ENDF data (CRAM_WITH_ENDFTK only)
 testing/depletion_pin_fixture.hpp  hand-built thermal-pin chain + one-group XS
 ```
 

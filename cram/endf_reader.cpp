@@ -1,13 +1,17 @@
 #include "cram/endf_reader.hpp"
 
-#ifndef WITH_ENDFTK
+#ifndef CRAM_WITH_ENDFTK
+
+#include <stdexcept>
 
 namespace cram {
-int loadDecayData(DepletionChain& /*chain*/, const std::string& /*path*/) {
-  return 0;
+int loadDecayData(DepletionChain& /*chain*/, const std::string& path) {
+  throw std::runtime_error("cram: cannot read '" + path +
+                           "': built without CRAM_WITH_ENDFTK (the ENDF reader)");
 }
-int loadFissionYields(DepletionChain& /*chain*/, const std::string& /*path*/, bool /*cumulative*/) {
-  return 0;
+int loadFissionYields(DepletionChain& /*chain*/, const std::string& path, bool /*cumulative*/) {
+  throw std::runtime_error("cram: cannot read '" + path +
+                           "': built without CRAM_WITH_ENDFTK (the ENDF reader)");
 }
 }  // namespace cram
 
@@ -149,4 +153,4 @@ int loadFissionYields(DepletionChain& chain, const std::string& path, bool useCu
 }
 
 }  // namespace cram
-#endif  // WITH_ENDFTK
+#endif  // CRAM_WITH_ENDFTK
