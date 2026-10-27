@@ -236,10 +236,20 @@ std::vector<Eigen::SparseMatrix<double>> intervalMatrices(DepletionSystem& syste
   // size will do.
   const Eigen::VectorXd any = Eigen::VectorXd::Zero(system.chain().size());
   const std::vector<Eigen::Triplet<double>> channels = channelPattern(system);
-  for (double phi : flux) {
-    system.setConstantFlux(phi);
-    A.push_back(withPattern(system.assemble(any), channels));
+  // Each interval is assembled at its own flux, and the caller's flux is put
+  // back afterwards -- on the error path too -- so building the schedule does
+  // not leave the system describing its last interval.
+  const double callerFlux = system.fluxFor(any);
+  try {
+    for (double phi : flux) {
+      system.setConstantFlux(phi);
+      A.push_back(withPattern(system.assemble(any), channels));
+    }
+  } catch (...) {
+    system.setConstantFlux(callerFlux);
+    throw;
   }
+  system.setConstantFlux(callerFlux);
   return A;
 }
 

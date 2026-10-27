@@ -71,6 +71,16 @@ public:
   explicit DepletionSystem(const DepletionChain& chain);
   explicit DepletionSystem(DepletionChain&&) = delete;
 
+  // Neither copyable nor movable: matrixBuilder() hands out a callable bound to
+  // this object's address, so a copy or a move would leave every builder made
+  // before it assembling from the original -- or from a dangling pointer once
+  // the original is gone -- while the caller configures the new one.
+  DepletionSystem(const DepletionSystem&) = delete;
+  DepletionSystem& operator=(const DepletionSystem&) = delete;
+  DepletionSystem(DepletionSystem&&) = delete;
+  DepletionSystem& operator=(DepletionSystem&&) = delete;
+  ~DepletionSystem() = default;
+
   // Re-cache the chain's decay matrix. Needed only after the chain itself
   // changes while this system exists -- the workflow the constructor's own
   // "call close() before building the matrix" warning invites, since close()

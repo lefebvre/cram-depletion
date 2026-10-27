@@ -50,13 +50,19 @@ struct Problem {
     A = intervalMatrices(sys, kFlux);
   }
 
-  // The system rebuilt on the current chain, for the contraction.
-  DepletionSystem system() const {
-    DepletionSystem sys(chain);
+  // The reactions of the system built on the current chain, for the
+  // contraction. Fills a caller-owned system: DepletionSystem is not movable,
+  // so it cannot be returned.
+  void configure(DepletionSystem& sys) const {
     configurePinReactions(sys);
     sys.setReactions(kU238, {fission(0.05), capture(kU239, u238Capture)});
     sys.setConstantFlux(0.0);
-    return sys;
+  }
+  std::vector<ReactionSensitivity> reactions(const std::vector<Eigen::SparseMatrix<double>>& S,
+                                             const std::vector<double>& flux) const {
+    DepletionSystem sys(chain);
+    configure(sys);
+    return reactionSensitivities(sys, S, flux);
   }
 
   double finalResponse(const Eigen::VectorXd& w) const {
@@ -201,7 +207,7 @@ TEST(Sensitivity, CaptureCrossSectionSensitivityMatchesFiniteDifference) {
   {
     const AdjointResult adj = adjointDeplete(p.A, kDts, w);
     const auto S = rateSensitivities(fwd, adj, p.A, kDts, kFine);
-    const double got = captureEntry(reactionSensitivities(p.system(), S, kFlux));
+    const double got = captureEntry(p.reactions(S, kFlux));
     const double fd = (plus.finalResponse(w) - minus.finalResponse(w)) / dSigma;
     EXPECT_NE(fd, 0.0);
     EXPECT_NEAR(got, fd, 1e-6 * std::abs(fd)) << "final-time response";
@@ -209,7 +215,7 @@ TEST(Sensitivity, CaptureCrossSectionSensitivityMatchesFiniteDifference) {
   {
     const AdjointResult adj = adjointDepleteIntegrated(p.A, kDts, w);
     const auto S = rateSensitivities(fwd, adj, p.A, kDts, kFine);
-    const double got = captureEntry(reactionSensitivities(p.system(), S, kFlux));
+    const double got = captureEntry(p.reactions(S, kFlux));
     const double fd = (plus.integratedResponse(w) - minus.integratedResponse(w)) / dSigma;
     EXPECT_NE(fd, 0.0);
     EXPECT_NEAR(got, fd, 1e-6 * std::abs(fd)) << "time-integrated response";
@@ -265,7 +271,7 @@ TEST(Sensitivity, RejectsBadOptionsAndMismatchedInputs) {
   // an accurate one, and the default rule costs ~80x as much to build it.
   const auto S = rateSensitivities(fwd, adj, p.A, kDts,
                                    {.gaussPoints = 1, .subIntervals = 1, .endRefinements = 0});
-  EXPECT_THROW(reactionSensitivities(p.system(), S, {1.0}), std::invalid_argument);
+  EXPECT_THROW(p.reactions(S, {1.0}), std::invalid_argument);
   EXPECT_THROW(sourceGenerator(p.A[0], Eigen::VectorXd::Zero(2)), std::invalid_argument);
 
   // decayConstantSensitivities() reads S at the chain's indices, so an S for a
@@ -358,6 +364,6 @@ TEST(Sensitivity, EmptyScheduleGivesEmptySensitivities) {
   const auto S = rateSensitivities(fwd, adj, {}, {});
   EXPECT_TRUE(S.empty());
   EXPECT_TRUE(decayConstantSensitivities(p.chain, S).isZero());
-  for (const auto& r : reactionSensitivities(p.system(), S, {}))
+  for (const auto& r : p.reactions(S, {}))
     EXPECT_DOUBLE_EQ(r.dRdSigma, 0.0);
 }
