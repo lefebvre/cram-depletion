@@ -123,6 +123,7 @@ Eigen::SparseMatrix<double> DepletionSystem::assemble(const Eigen::VectorXd& n) 
 
   std::vector<Eigen::Triplet<double>> t;
   if (flux != 0.0) {
+    std::vector<std::pair<int, double>> column;  // reused across channels
     for (const auto& [parent, rxns] : reactions_) {
       const int pi = chain_.indexOf(parent);
       if (pi < 0)
@@ -131,28 +132,15 @@ Eigen::SparseMatrix<double> DepletionSystem::assemble(const Eigen::VectorXd& n) 
         const double rate = r.sigma * kBarn * flux;  // per-atom rate [1/s]
         if (rate == 0.0)
           continue;
-        if (r.type == ReactionType::Fission) {
-          if (chain_.nearestYields(parent, r.energy) != nullptr) {
-            chain_.addFissionSource(t, parent, rate, r.energy);
-          } else {
-            // Fissionable with no yield table (a chain trimmed of its yields,
-            // or a nuclide whose yields were never supplied): the parent is
-            // still consumed, exactly as for an untracked product below. Left
-            // to addFissionSource() the whole channel would drop out -- no
-            // removal either -- while fissionPowerWeight() still credits its
-            // energy release, so constant-power normalization would silently
-            // under-burn the material to hold a power the matrix does not
-            // deliver.
-            t.emplace_back(pi, pi, -rate);
-          }
-        } else if (r.target && chain_.indexOf(*r.target) >= 0) {
-          chain_.addReaction(t, parent, *r.target, rate);
-        } else {
-          // Product not tracked in the chain (an untracked target, or one the
-          // chain never registered): the parent is still consumed, the product
-          // is just lost.
-          t.emplace_back(pi, pi, -rate);
-        }
+        // The stencil keeps the removal even when the product is lost: a
+        // fission channel with no yield table, or a target the chain does not
+        // track. Dropping the whole channel instead would leave
+        // fissionPowerWeight() crediting energy the matrix never releases, so
+        // constant-power normalization would silently under-burn.
+        chain_.reactionStencil(parent, r.type == ReactionType::Fission, r.target, r.energy,
+                               column);
+        for (const auto& [j, c] : column)
+          t.emplace_back(j, pi, rate * c);
       }
     }
   }

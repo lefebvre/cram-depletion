@@ -160,16 +160,20 @@ std::vector<Eigen::SparseMatrix<double>> rateSensitivities(
     SensitivityOptions options = {}, CramOrder order = CramOrder::CRAM48);
 
 // dR/d(lambda_i) for every nuclide, indexed like the chain (0 for a nuclide
-// with no decay). Contracts the summed S_k with dA/d(lambda_i): -1 on the
-// diagonal, +branching at each mode's daughter, +branching*yield at each
-// spontaneous-fission product.
+// with no decay). Contracts the summed S_k with dA/d(lambda_i), which is
+// DepletionChain::decayStencil(i): -1 on the diagonal, +branching at each
+// mode's daughter, +branching*yield at each spontaneous-fission product.
+// Throws std::invalid_argument if an S_k is not sized like the chain, or does
+// not carry an entry for every one of those positions -- see
+// rateSensitivities() above.
 Eigen::VectorXd decayConstantSensitivities(const DepletionChain& chain,
                                            const std::vector<Eigen::SparseMatrix<double>>& S);
 
 // dR/d(sigma) [per barn] for every channel of the system, in the order of
-// system.reactions(). Contracts each S_k with flux[k] * 1e-24 * dA/d(sigma):
-// -1 on the parent diagonal, +1 at a tracked target, +yield at each fission
-// product (yields at the channel's energy). flux.size() must equal S.size().
+// system.reactions(). Contracts each S_k with flux[k] * 1e-24 * dA/d(sigma),
+// where dA/d(sigma) is DepletionChain::reactionStencil(): -1 on the parent
+// diagonal, +1 at a tracked target, +yield at each fission product (yields at
+// the channel's energy). flux.size() must equal S.size().
 // Throws std::invalid_argument if S does not carry an entry for every one of
 // those positions -- see rateSensitivities() above.
 struct ReactionSensitivity {

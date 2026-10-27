@@ -173,6 +173,37 @@ public:
   // sensitivity code does) sees the same product the matrix does.
   static std::optional<Zai> decayDaughter(const Zai& parent, const DecayMode& m);
 
+  // --- Column stencils -----------------------------------------------------
+  //
+  // The single statement of which matrix entries a process touches, and with
+  // what coefficient per unit rate. Matrix assembly multiplies a stencil by the
+  // rate; the sensitivity code reads the same stencil as dA/d(parameter), and
+  // pre-sizes its integrals over the same entries. Holding all of that to one
+  // definition is what keeps a derivative from quietly describing a different
+  // matrix than the one that was solved.
+  //
+  // Each fills `out` with (row, coefficient) pairs for the parent's column,
+  // after clearing it; the caller owns the buffer so a loop over nuclides
+  // reuses one allocation. A row may appear more than once (two modes to one
+  // daughter), in which case the coefficients add.
+
+  // Decay of the nuclide at matrix index `index`, per unit decay constant: -1
+  // on the diagonal, +branching at each registered daughter, and
+  // +branching*yield at each product of its spontaneous-fission table. Empty
+  // for a nuclide with no decay. A mode with zero branching, an unregistered
+  // daughter, and an SF mode with no SF table contribute nothing, exactly as in
+  // decayMatrix(). Throws std::out_of_range for an index outside the chain.
+  void decayStencil(int index, std::vector<std::pair<int, double>>& out) const;
+
+  // One neutron reaction channel of `parent`, per unit reaction rate: -1 on the
+  // diagonal; then for fission +yield at each product of the neutron-induced
+  // table nearest `energy`, and for any other channel +1 at `target` when it is
+  // registered. A fission channel with no table, or a target that is absent or
+  // unregistered, keeps only the removal: the parent is consumed and the
+  // product is lost. Empty when `parent` is not registered.
+  void reactionStencil(const Zai& parent, bool isFission, const std::optional<Zai>& target,
+                       double energy, std::vector<std::pair<int, double>>& out) const;
+
 private:
   // A yield set together with its products already resolved to matrix indices.
   //
@@ -199,6 +230,12 @@ private:
   // sync in setDecay(), the only place decay_ gains a key.
   std::vector<int> decayOrder_;
   std::unordered_map<std::int64_t, std::vector<YieldEntry>> nfy_;
+
+  // decayStencil() for a nuclide whose decay data is already in hand. Adds to
+  // `dropped` each daughter missing from the chain and to `untrackedSf` each
+  // spontaneous-fission mode with no SF table.
+  void decayStencil(int index, const DecayData& d, std::vector<std::pair<int, double>>& out,
+                    int& dropped, int& untrackedSf) const;
 
   // `dropped` receives the number of decay daughters missing from the chain,
   // `untrackedSf` the number of spontaneous-fission modes with no SF table.
