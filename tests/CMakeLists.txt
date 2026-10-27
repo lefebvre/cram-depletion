@@ -21,7 +21,7 @@ if(CRAM_WITH_CHAIN_XML)
 endif()
 
 target_include_directories(unit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-                                              ${CMAKE_SOURCE_DIR}/testing)
+                                              ${PROJECT_SOURCE_DIR}/testing)
 target_link_libraries(unit_tests PRIVATE cram cram_quality_flags cram_warning_flags
                                          GTest::gtest_main)
 
