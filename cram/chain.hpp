@@ -78,9 +78,9 @@ struct DecayData {
 //
 // `energy` has no default member initializer: 0 already means something —
 // spontaneous fission — so an omitted incident energy does not fail, it
-// reclassifies a neutron-induced yield table as an SF one and sends
-// nearestYields() to the wrong table for every lookup. `products` keeps its
-// initializer because the product list is filled in after construction.
+// reclassifies a neutron-induced yield table as an SF one, where
+// nearestYields() never looks. `products` keeps its initializer because the
+// product list is filled in after construction.
 struct FissionYields {
   double energy;                                      // incident neutron energy [eV]
   std::vector<std::pair<Zai, double>> products = {};  // (product, yield per fission)
@@ -112,8 +112,14 @@ public:
   void addFissionYields(const Zai& parent, FissionYields y);
 
   const DecayData* decay(const Zai& z) const;
-  // Independent yields for `parent` at the energy nearest to `energy` [eV].
+  // Independent neutron-induced yields for `parent` at the incident energy
+  // nearest to `energy` [eV]. Only tables at a non-zero energy are candidates:
+  // the table at energy 0 is the spontaneous-fission one, which a neutron
+  // lookup must never land on just because it is the nearest available.
   const FissionYields* nearestYields(const Zai& parent, double energy) const;
+  // The spontaneous-fission yields of `parent`: its table at energy exactly 0,
+  // or null. Never a neutron-induced table standing in for a missing one.
+  const FissionYields* spontaneousFissionYields(const Zai& parent) const;
 
   // Register every reachable decay daughter not already in the chain, so matrix
   // assembly can never silently drop a daughter's production. Added daughters
@@ -129,10 +135,18 @@ public:
   // If `droppedDaughters` is non-null it receives the number of decay daughters
   // that were not registered in the chain, and whose production is therefore
   // absent from the matrix — meaning the matrix does not conserve atoms. Call
-  // close() beforehand and it will be zero. When the pointer is null the same
-  // condition is reported as a warning on stderr instead, so it can never pass
-  // unnoticed either way.
-  Eigen::SparseMatrix<double> decayMatrix(int* droppedDaughters = nullptr) const;
+  // close() beforehand and it will be zero.
+  //
+  // If `untrackedSpontaneousFission` is non-null it receives the number of
+  // spontaneous-fission modes whose parent has no SF yield table: the parent
+  // is still removed at the mode's rate, but no products are produced, so
+  // those atoms leave the system too. close() cannot help here; the remedy is
+  // a table at energy 0, or a named daughter on the mode.
+  //
+  // For either pointer left null, a non-zero count is reported as a warning on
+  // stderr instead, so neither condition can pass unnoticed.
+  Eigen::SparseMatrix<double> decayMatrix(int* droppedDaughters = nullptr,
+                                          int* untrackedSpontaneousFission = nullptr) const;
 
   // Add a neutron-induced fission source for one parent into an existing
   // matrix builder. `fissionRate` is the per-atom fission rate of the parent
@@ -186,12 +200,17 @@ private:
   std::vector<int> decayOrder_;
   std::unordered_map<std::int64_t, std::vector<YieldEntry>> nfy_;
 
-  // `dropped` receives the number of decay daughters missing from the chain.
-  void decayTriplets(std::vector<Eigen::Triplet<double>>& t, int& dropped) const;
+  // `dropped` receives the number of decay daughters missing from the chain,
+  // `untrackedSf` the number of spontaneous-fission modes with no SF table.
+  void decayTriplets(std::vector<Eigen::Triplet<double>>& t, int& dropped,
+                     int& untrackedSf) const;
 
   static void warnDroppedDaughters(int dropped);
+  static void warnUntrackedSpontaneousFission(int untracked);
 
+  // Nearest neutron-induced table (energy != 0); the SF table (energy == 0).
   const YieldEntry* nearestEntry(const Zai& parent, double energy) const;
+  const YieldEntry* spontaneousFissionEntry(const Zai& parent) const;
 
   // Emit production triplets for the given fission-yield set, each weighted by
   // `rate` * yield. Caller is responsible for the parent-removal term.

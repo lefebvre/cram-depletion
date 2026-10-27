@@ -414,7 +414,7 @@ Eigen::VectorXd decayConstantSensitivities(const DepletionChain& chain,
     double s = -total.coeff(i, i);
     for (const DecayMode& m : d->modes) {
       if (m.isFission) {
-        if (const FissionYields* y = chain.nearestYields(parent, 0.0))
+        if (const FissionYields* y = chain.spontaneousFissionYields(parent))
           for (const auto& [product, yield] : y->products)
             s += m.branching * yield * total.coeff(chain.indexOf(product), i);
         continue;

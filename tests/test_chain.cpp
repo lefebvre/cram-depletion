@@ -384,7 +384,9 @@ TEST(DecayMatrix, SpontaneousFissionWithoutYieldsJustRemoves) {
              DecayData{.halfLife = 5.7e8,
                        .modes = {DecayMode{
                            .rtyp = 6.0, .branching = 1.0, .finalState = 0, .isFission = true}}});
-  auto M = c.decayMatrix();
+  int untracked = -1;
+  auto M = c.decayMatrix(nullptr, &untracked);
+  EXPECT_EQ(untracked, 1) << "the lost atoms are reported, not just lost";
   const double lam = kLn2 / 5.7e8;
   int i = c.indexOf(Cm);
   EXPECT_NEAR(M.coeff(i, i), -lam, 1e-20);
@@ -392,6 +394,34 @@ TEST(DecayMatrix, SpontaneousFissionWithoutYieldsJustRemoves) {
   for (int r = 0; r < M.rows(); ++r)
     col += M.coeff(r, i);
   EXPECT_NEAR(col, -lam, 1e-20);  // mass leaves the tracked system
+}
+
+// The energy-0 slot is spontaneous fission and nothing else. A thermal table
+// must not stand in for a missing SF one, and an SF table must not answer a
+// neutron-induced lookup just because it is the only table there is.
+TEST(DecayMatrix, SpontaneousAndNeutronInducedYieldsNeverSubstitute) {
+  DepletionChain c;
+  const Zai Cm{96, 244, 0}, thermalProduct{54, 135, 0}, sfProduct{44, 108, 0};
+  c.addFissionYields(Cm, FissionYields{.energy = 0.0253, .products = {{thermalProduct, 1.0}}});
+  c.setDecay(Cm,
+             DecayData{.halfLife = 5.7e8,
+                       .modes = {DecayMode{
+                           .rtyp = 6.0, .branching = 1.0, .finalState = 0, .isFission = true}}});
+  EXPECT_EQ(c.spontaneousFissionYields(Cm), nullptr);
+  int untracked = -1;
+  auto M = c.decayMatrix(nullptr, &untracked);
+  EXPECT_EQ(untracked, 1);
+  EXPECT_EQ(M.coeff(c.indexOf(thermalProduct), c.indexOf(Cm)), 0.0)
+      << "thermal yields stood in for spontaneous fission";
+
+  DepletionChain sfOnly;
+  sfOnly.addFissionYields(Cm, FissionYields{.energy = 0.0, .products = {{sfProduct, 1.0}}});
+  ASSERT_NE(sfOnly.spontaneousFissionYields(Cm), nullptr);
+  EXPECT_EQ(sfOnly.nearestYields(Cm, 0.0253), nullptr);
+  EXPECT_EQ(sfOnly.nearestYields(Cm, 0.0), nullptr);
+  std::vector<Eigen::Triplet<double>> t;
+  sfOnly.addFissionSource(t, Cm, 1.0, 0.0253);
+  EXPECT_TRUE(t.empty()) << "a neutron-induced source used the SF table";
 }
 
 // An unregistered daughter means the matrix silently loses that production and

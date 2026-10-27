@@ -118,6 +118,8 @@ const DepletionChain::YieldEntry* DepletionChain::nearestEntry(const Zai& parent
   const YieldEntry* best = nullptr;
   double bestDist = std::numeric_limits<double>::infinity();
   for (const auto& entry : it->second) {
+    if (entry.yields.energy == 0.0)
+      continue;  // the spontaneous-fission table: not a neutron-induced one
     double d = std::abs(entry.yields.energy - energy);
     if (d < bestDist) {
       bestDist = d;
@@ -129,6 +131,20 @@ const DepletionChain::YieldEntry* DepletionChain::nearestEntry(const Zai& parent
 
 const FissionYields* DepletionChain::nearestYields(const Zai& parent, double energy) const {
   const YieldEntry* entry = nearestEntry(parent, energy);
+  return entry == nullptr ? nullptr : &entry->yields;
+}
+
+const DepletionChain::YieldEntry* DepletionChain::spontaneousFissionEntry(const Zai& parent) const {
+  auto it = nfy_.find(parent.key());
+  if (it == nfy_.end())
+    return nullptr;
+  const auto sf = std::find_if(it->second.begin(), it->second.end(),
+                               [](const YieldEntry& e) { return e.yields.energy == 0.0; });
+  return sf == it->second.end() ? nullptr : &*sf;
+}
+
+const FissionYields* DepletionChain::spontaneousFissionYields(const Zai& parent) const {
+  const YieldEntry* entry = spontaneousFissionEntry(parent);
   return entry == nullptr ? nullptr : &entry->yields;
 }
 
@@ -162,8 +178,10 @@ void DepletionChain::emitFissionProducts(std::vector<Eigen::Triplet<double>>& t,
     t.emplace_back(j, parentIndex, rate * yield);
 }
 
-void DepletionChain::decayTriplets(std::vector<Eigen::Triplet<double>>& t, int& dropped) const {
-  dropped = 0;  // daughters not registered -> production lost (chain not closed)
+void DepletionChain::decayTriplets(std::vector<Eigen::Triplet<double>>& t, int& dropped,
+                                   int& untrackedSf) const {
+  dropped = 0;      // daughters not registered -> production lost (chain not closed)
+  untrackedSf = 0;  // SF modes with no SF table -> products lost
   // Walk decayOrder_, not decay_. Triplet order reaches setFromTriplets(), which
   // sums duplicate entries in the order it receives them, so iterating an
   // unordered_map would let the hash function decide the floating-point result.
@@ -196,8 +214,13 @@ void DepletionChain::decayTriplets(std::vector<Eigen::Triplet<double>>& t, int& 
         continue;
 
       if (m.isFission) {
-        if (const YieldEntry* entry = nearestEntry(parent, 0.0))
-          emitFissionProducts(t, i, *entry, rate);  // spontaneous fission
+        // Only the parent's own SF table. Substituting the nearest neutron-
+        // induced one would put a thermal fission's products where a
+        // spontaneous fission's belong, with nothing to say it happened.
+        if (const YieldEntry* entry = spontaneousFissionEntry(parent))
+          emitFissionProducts(t, i, *entry, rate);
+        else
+          ++untrackedSf;  // removed at `rate` above, nothing produced
         continue;
       }
 
@@ -237,7 +260,18 @@ void DepletionChain::warnDroppedDaughters(int dropped) {
   }
 }
 
-Eigen::SparseMatrix<double> DepletionChain::decayMatrix(int* droppedDaughters) const {
+void DepletionChain::warnUntrackedSpontaneousFission(int untracked) {
+  if (untracked > 0) {
+    std::fprintf(stderr,
+                 "cram: WARNING - %d spontaneous-fission mode(s) belong to a parent with no "
+                 "spontaneous-fission yield table (energy 0); the parent is removed but no "
+                 "products are produced, so the decay matrix will not conserve atoms.\n",
+                 untracked);
+  }
+}
+
+Eigen::SparseMatrix<double> DepletionChain::decayMatrix(int* droppedDaughters,
+                                                        int* untrackedSpontaneousFission) const {
   std::vector<Eigen::Triplet<double>> t;
   // Each decaying nuclide contributes a diagonal term plus one production
   // triplet per decay mode (spontaneous-fission modes add more, but those are
@@ -251,7 +285,8 @@ Eigen::SparseMatrix<double> DepletionChain::decayMatrix(int* droppedDaughters) c
   t.reserve(estimate);
 
   int dropped = 0;
-  decayTriplets(t, dropped);
+  int untrackedSf = 0;
+  decayTriplets(t, dropped, untrackedSf);
   // Reported through the out-parameter when the caller asked for it, and only
   // written to stderr otherwise. A caller that inspects the count is handling
   // the condition and does not need a warning printed underneath it. Passing it
@@ -262,6 +297,10 @@ Eigen::SparseMatrix<double> DepletionChain::decayMatrix(int* droppedDaughters) c
     *droppedDaughters = dropped;
   else
     warnDroppedDaughters(dropped);
+  if (untrackedSpontaneousFission != nullptr)
+    *untrackedSpontaneousFission = untrackedSf;
+  else
+    warnUntrackedSpontaneousFission(untrackedSf);
 
   return finalize(std::move(t));
 }
