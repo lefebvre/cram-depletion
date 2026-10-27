@@ -63,8 +63,9 @@ where the figures draw their reference line and what the summary counts, but the
 tool exits 0 regardless. `--fail-over-tolerance N` turns it into a gate, exiting
 1 when more than `N` nuclides exceed it, which is how this would become a CI
 check. The `validation-report` job reports without gating today; `vera_pin1a`
-currently puts 0 of 181 nuclides over 1e-3 (worst 3.8e-13), so the gate has
-nothing to catch until a case is added that does.
+currently puts 0 of 181 nuclides over the default 1e-10 (worst 2.7e-13), the
+relative tolerance the regression test asserts, so the gate has nothing to
+catch until a case is added that does.
 
 Set `SOURCE_DATE_EPOCH` to pin the timestamp and get a byte-identical
 regeneration.

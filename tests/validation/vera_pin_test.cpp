@@ -20,6 +20,7 @@
 //
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -52,6 +53,10 @@ namespace {
 using cram_validation::VeraCase;
 
 }  // namespace
+
+// See the comparison below for how these were chosen.
+constexpr double kRelTol = 1e-10;
+constexpr double kAbsTol = 1e-12;
 
 class VeraPin : public ::testing::TestWithParam<std::string> {};
 
@@ -86,50 +91,77 @@ TEST_P(VeraPin, ReproducesOpenMCPredictorTrajectory) {
   EXPECT_GT(fissionChannels, 0);
   auto integ = makeIntegrator(IntegratorKind::Predictor, sys.matrixBuilder());
 
-  Eigen::VectorXd n = c.refDensity[0];
+  std::vector<Eigen::VectorXd> traj{c.refDensity[0]};
   for (int k = 1; k <= c.steps; ++k) {
     const auto s = static_cast<std::size_t>(k - 1);
     sys.setConstantFlux(c.flux[s]);
-    n = integ->step(n, c.dt[s]);
+    traj.push_back(integ->step(traj.back(), c.dt[s]));
   }
 
-  // Compare EVERY nuclide the reference reports as present at end of life, the
-  // same set validation/report/ tabulates -- not a curated subset.
+  // Compare EVERY nuclide the reference reports, at EVERY step -- not a
+  // curated subset, and not only end of life.
   //
   // A curated list used to stand here, justified as leaving out deep-chain
   // trace actinides "sensitive to metastable/branching subtleties of the
   // simplified chain". What it actually left out were the nuclides exposing two
   // defects in the chain reader: fission yields delegated with
   // <neutron_fission_yields parent="..."/>, and the target OpenMC names on an
-  // `sf` decay mode. Read correctly, all of them agree -- the trace actinides
-  // included, and by ten orders of margin -- so there is nothing to curate.
-  const Eigen::VectorXd& ref = c.refDensity[static_cast<std::size_t>(c.steps)];
+  // `sf` decay mode. Read correctly, all of them agree to CRAM precision.
+  //
+  // So the tolerance is set near that precision rather than at the 1e-3 it
+  // used to be, which let ten orders of magnitude of regression through: a
+  // nuclide passes when |cram - openmc| <= kRelTol * openmc + kAbsTol * scale,
+  // scale being the step's largest inventory. The absolute term is CRAM's
+  // floor -- an error of ~1e-15 of the largest entry, which a trace nuclide
+  // many orders below it cannot resolve relatively -- and it is also what a
+  // nuclide the reference reports as exactly zero is held to, so the engine
+  // cannot produce one the reference does not.
+  //
+  // Measured on vera_pin1a over all 14 steps: the worst relative error of any
+  // nuclide above 1e-9 of the largest inventory is 1.1e-14, and the worst
+  // error of any nuclide is 3.0e-15 of the largest inventory. kRelTol and
+  // kAbsTol leave four and two orders of margin for other toolchains and Eigen
+  // versions, and still fail on anything that is not round-off.
   const auto name = [&](int i) {
     const Zai& z = c.chain.nuclides()[static_cast<std::size_t>(i)];
     return elementSymbol(z.z) + std::to_string(z.a) + (z.i != 0 ? "_m" + std::to_string(z.i) : "");
   };
-
   int compared = 0;
-  double worst = 0.0;
-  int worstIndex = -1;
-  for (int i = 0; i < ref.size(); ++i) {
-    if (!(ref(i) > 0.0))
-      continue;  // absent from the reference: no relative error to speak of
-    ++compared;
-    const double e = std::abs(n(i) - ref(i)) / ref(i);
-    if (e > worst) {
-      worst = e;
-      worstIndex = i;
+  double worstRel = 0.0;
+  double worstAbs = 0.0;
+  std::string worstNuclide = "none";
+  for (int k = 1; k <= c.steps; ++k) {
+    const auto ks = static_cast<std::size_t>(k);
+    const Eigen::VectorXd& ref = c.refDensity[ks];
+    const Eigen::VectorXd& n = traj[ks];
+    const double scale = ref.maxCoeff();
+    for (int i = 0; i < ref.size(); ++i) {
+      if (c.reported[static_cast<std::size_t>(i)] == 0)
+        continue;  // the reference says nothing about this nuclide
+      const double diff = std::abs(n(i) - ref(i));
+      worstAbs = std::max(worstAbs, diff / scale);
+      if (ref(i) > 0.0) {
+        ++compared;
+        if (diff / ref(i) > worstRel && ref(i) > 1e-9 * scale) {  // above trace level
+          worstRel = diff / ref(i);
+          worstNuclide = name(i) + " step " + std::to_string(k);
+        }
+      }
+      EXPECT_LE(diff, kRelTol * ref(i) + kAbsTol * scale)
+          << name(i) << " step " << k << ": cram=" << n(i) << " openmc=" << ref(i);
     }
-    EXPECT_LT(e, 1e-3) << name(i) << ": cram=" << n(i) << " openmc=" << ref(i);
   }
-  EXPECT_GT(compared, 50) << "the reference reports too few nuclides to be the pin case";
+  EXPECT_GT(compared, 50 * c.steps) << "the reference reports too few nuclides to be the pin case";
   RecordProperty("compared", compared);
-  std::ostringstream worstText;  // std::to_string would print 4e-13 as 0.000000
-  worstText << std::scientific << std::setprecision(3) << worst;
-  RecordProperty("worst_relative_error", worstText.str());
-  RecordProperty("worst_nuclide", worstIndex < 0 ? "none" : name(worstIndex));
+  std::ostringstream text;  // std::to_string would print 4e-13 as 0.000000
+  text << std::scientific << std::setprecision(3) << worstRel;
+  RecordProperty("worst_relative_error", text.str());
+  RecordProperty("worst_nuclide", worstNuclide);
+  text.str("");
+  text << worstAbs;
+  RecordProperty("worst_error_relative_to_largest_inventory", text.str());
 
+  const Eigen::VectorXd& ref = c.refDensity[static_cast<std::size_t>(c.steps)];
   // Every nuclide the benchmark reports must be among them: the comparison
   // above skips a nuclide the reference does not carry, so without this a data
   // file missing half the actinides would still pass it.
