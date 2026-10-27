@@ -144,6 +144,14 @@ TEST(ChainXml, MalformedNumbersAndTablesThrow) {
   EXPECT_NO_THROW(load(R"(<nuclide name="I135" half_life=" +23652.0 "/>)"));
   EXPECT_THROW(load(R"(<nuclide name="I135" half_life="23652.0s"/>)"), std::runtime_error);
   EXPECT_THROW(load(R"(<nuclide name="I135" half_life="1e9999"/>)"), std::runtime_error);
+  // One sign only: stripping the '+' that from_chars refuses must not let a
+  // second sign through, which would read "+-0.5" as a negative yield.
+  EXPECT_THROW(load(R"(<nuclide name="I135" half_life="+-1.0"/>)"), std::runtime_error);
+  EXPECT_THROW(load(R"(<nuclide name="I135" half_life="++1.0"/>)"), std::runtime_error);
+  EXPECT_THROW(load(R"(<nuclide name="U235"><neutron_fission_yields>
+                         <fission_yields energy="0.0253"><products>Xe135</products>
+                         <data>+-0.5</data></fission_yields></neutron_fission_yields></nuclide>)"),
+               std::runtime_error);
   EXPECT_THROW(load(R"(<nuclide name="I135" half_life="1.0">
                          <decay type="beta-" target="Xe135" branching_ratio="0,9"/></nuclide>)"),
                std::runtime_error);
