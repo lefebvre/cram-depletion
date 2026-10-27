@@ -413,12 +413,15 @@ TEST(DecayMatrix, SpontaneousAndNeutronInducedYieldsNeverSubstitute) {
   EXPECT_EQ(untracked, 1);
   EXPECT_EQ(M.coeff(c.indexOf(thermalProduct), c.indexOf(Cm)), 0.0)
       << "thermal yields stood in for spontaneous fission";
+  EXPECT_EQ(c.nearestYields(Cm, 0.0), nullptr) << "an energy-0 lookup found the thermal table";
 
+  // A lookup at energy 0 names the SF slot: an SF tape staged by listing its
+  // incident energies (0, for spontaneous fission) must find its own table.
   DepletionChain sfOnly;
   sfOnly.addFissionYields(Cm, FissionYields{.energy = 0.0, .products = {{sfProduct, 1.0}}});
   ASSERT_NE(sfOnly.spontaneousFissionYields(Cm), nullptr);
+  EXPECT_EQ(sfOnly.nearestYields(Cm, 0.0), sfOnly.spontaneousFissionYields(Cm));
   EXPECT_EQ(sfOnly.nearestYields(Cm, 0.0253), nullptr);
-  EXPECT_EQ(sfOnly.nearestYields(Cm, 0.0), nullptr);
   std::vector<Eigen::Triplet<double>> t;
   sfOnly.addFissionSource(t, Cm, 1.0, 0.0253);
   EXPECT_TRUE(t.empty()) << "a neutron-induced source used the SF table";
