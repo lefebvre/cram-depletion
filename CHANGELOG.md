@@ -30,8 +30,9 @@ releasing them means a major version.
   (`requireTimeStep()`).
 - **Breaking:** spontaneous and neutron-induced yields no longer stand in for
   each other. Spontaneous fission uses only the table at energy 0
-  (`DepletionChain::spontaneousFissionYields()`), and `nearestYields()` only
-  tables at a non-zero energy. An SF mode whose parent has no SF table is
+  (`DepletionChain::spontaneousFissionYields()`). `nearestYields()` at a
+  non-zero energy considers only neutron-induced tables, and at energy 0
+  returns the SF table or null, never the nearest thermal table. An SF mode whose parent has no SF table is
   reported through a new out-parameter of `decayMatrix()`, or on stderr.
 - `DepletionChain::decayStencil()` and `reactionStencil()` state the matrix
   entries of each process once. Matrix assembly, the interval-matrix structure

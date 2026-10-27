@@ -112,6 +112,10 @@ int DepletionChain::close() {
 
 const DepletionChain::YieldEntry* DepletionChain::nearestEntry(const Zai& parent,
                                                                double energy) const {
+  // Energy 0 is the spontaneous-fission slot, asked for by name: it gets the
+  // SF table or nothing, never the neutron-induced table nearest to 0 eV.
+  if (energy == 0.0)
+    return spontaneousFissionEntry(parent);
   auto it = nfy_.find(parent.key());
   if (it == nfy_.end() || it->second.empty())
     return nullptr;

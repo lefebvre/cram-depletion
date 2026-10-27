@@ -112,10 +112,13 @@ public:
   void addFissionYields(const Zai& parent, FissionYields y);
 
   const DecayData* decay(const Zai& z) const;
-  // Independent neutron-induced yields for `parent` at the incident energy
-  // nearest to `energy` [eV]. Only tables at a non-zero energy are candidates:
-  // the table at energy 0 is the spontaneous-fission one, which a neutron
-  // lookup must never land on just because it is the nearest available.
+  // Independent yields for `parent` at the incident energy nearest to `energy`
+  // [eV]. The table at energy 0 is the spontaneous-fission one, and the two
+  // kinds never stand in for each other: for a non-zero `energy` only
+  // neutron-induced tables (non-zero energy) are candidates, so the lookup
+  // cannot land on the SF table just because it is the nearest available; for
+  // `energy` == 0 the result is spontaneousFissionYields(), the SF table or
+  // null, never the thermal table nearest to 0 eV.
   const FissionYields* nearestYields(const Zai& parent, double energy) const;
   // The spontaneous-fission yields of `parent`: its table at energy exactly 0,
   // or null. Never a neutron-induced table standing in for a missing one.
