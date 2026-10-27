@@ -4,6 +4,7 @@
 #include <stdexcept>
 
 #include "cram/cram_poles.hpp"
+#include "cram/fill_ordering_internal.hpp"
 
 namespace cram {
 
@@ -14,7 +15,7 @@ CramSolver::CramSolver(CramOrder order) : order_(order) {
   alpha_.assign(poles.alpha.begin(), poles.alpha.end());
   lus_.resize(theta_.size());
   std::generate(lus_.begin(), lus_.end(),
-                [] { return std::make_unique<Eigen::SparseLU<Eigen::SparseMatrix<cd>>>(); });
+                [] { return std::make_unique<PoleLU>(); });
 }
 
 bool CramSolver::patternMatches(const Eigen::SparseMatrix<cd>& m) const {
@@ -41,19 +42,25 @@ void CramSolver::beginPrepare(const Eigen::SparseMatrix<double>& A, double dt) {
   n_ = static_cast<int>(A.rows());
   prepared_ = false;
 
-  scaled_ = (A.cast<cd>() * cd(dt, 0.0)).eval();
+  const Eigen::SparseMatrix<cd> scaled = (A.cast<cd>() * cd(dt, 0.0)).eval();
 
   // The sparsity of (A*dt - theta_l*I) is identical for every pole, so one
   // pole matrix settles the pattern question for all of them. Decide reuse
   // here, before any pole is touched, so the pole loop reads a value nobody
-  // writes -- which is what lets those calls run concurrently.
+  // writes -- which is what lets those calls run concurrently. The ordering is
+  // a function of the pattern alone, so it is reused along with the analysis.
   Eigen::SparseMatrix<cd> I(n_, n_);
   I.setIdentity();
-  Eigen::SparseMatrix<cd> M0 = scaled_ - (theta_[0] * I);
+  Eigen::SparseMatrix<cd> M0 = scaled - (theta_[0] * I);
   M0.makeCompressed();
   reuseSymbolic_ = symbolicValid_ && patternMatches(M0);
-  if (!reuseSymbolic_)
+  if (!reuseSymbolic_) {
     recordPattern(M0);
+    ordering_ = internal::fillReducingOrder(M0);
+  }
+  // Every pole factorizes P (A dt - theta I) P^T = P A dt P^T - theta I.
+  scaled_ = ordering_ * scaled * ordering_.transpose();
+  scaled_.makeCompressed();
 
   // A failed factorization leaves the symbolic state untrustworthy, so drop it
   // up front and only reinstate it in endPrepare() once every pole is clean.
@@ -117,7 +124,9 @@ Eigen::VectorXd CramSolver::apply(const Eigen::VectorXd& n0) const {
   if (n0.size() != n_)
     throw std::invalid_argument("cram: CramSolver::apply n0.size() does not match prepared A");
 
-  Eigen::VectorXd y = n0;
+  // exp(A dt) = P^T exp(P A dt P^T) P, and the factorizations are of the
+  // permuted matrix, so the vector is carried into that ordering and back.
+  Eigen::VectorXd y = ordering_ * n0;
   // This loop allocates two n-vectors per pole. Hoisting them into reusable
   // member scratch was tried and measured no faster at N = 256, 1024 or 1675 --
   // the triangular solves dominate so thoroughly that the allocations do not
@@ -129,7 +138,7 @@ Eigen::VectorXd CramSolver::apply(const Eigen::VectorXd& n0) const {
       throw std::runtime_error("cram: SparseLU solve failed in CramSolver::apply");
     y += 2.0 * (alpha_[l] * x).real();
   }
-  return y * alpha0_;
+  return ordering_.transpose() * (y * alpha0_);
 }
 
 Eigen::VectorXd CramSolver::applyTranspose(const Eigen::VectorXd& n0) const {
@@ -139,7 +148,8 @@ Eigen::VectorXd CramSolver::applyTranspose(const Eigen::VectorXd& n0) const {
     throw std::invalid_argument(
         "cram: CramSolver::applyTranspose n0.size() does not match prepared A");
 
-  Eigen::VectorXd y = n0;
+  // (P A P^T)^T = P A^T P^T, so the same ordering carries over.
+  Eigen::VectorXd y = ordering_ * n0;
   for (std::size_t l = 0; l < theta_.size(); ++l) {
     // transpose(), not adjoint(): theta_l is not conjugated in
     // (A*dt - theta_l*I)^T = A^T*dt - theta_l*I.
@@ -149,7 +159,7 @@ Eigen::VectorXd CramSolver::applyTranspose(const Eigen::VectorXd& n0) const {
       throw std::runtime_error("cram: SparseLU solve failed in CramSolver::applyTranspose");
     y += 2.0 * (alpha_[l] * x).real();
   }
-  return y * alpha0_;
+  return ordering_.transpose() * (y * alpha0_);
 }
 
 }  // namespace cram

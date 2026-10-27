@@ -17,6 +17,26 @@
 
 namespace cram {
 
+namespace internal {
+
+// The column ordering to give Eigen::SparseLU for a matrix that fillReducingOrder() (fill_ordering_internal.hpp)
+// has already permuted: it keeps the columns where they are. Not
+// Eigen::NaturalOrdering, which does the same but hands SparseLU an *empty*
+// permutation -- and SparseLU applies its column elimination-tree postorder
+// only through a non-empty one, so with NaturalOrdering the postorder is
+// computed and then discarded. That postorder is what groups columns into
+// supernodes; without it the burnup-shape solves measured ~20% slower.
+template <typename StorageIndex>
+struct PresetOrdering {
+  using PermutationType = Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic, StorageIndex>;
+  template <typename MatrixType>
+  void operator()(const MatrixType& mat, PermutationType& perm) {
+    perm.setIdentity(mat.cols());
+  }
+};
+
+}  // namespace internal
+
 class CramSolver {
 public:
   explicit CramSolver(CramOrder order = CramOrder::CRAM48);
@@ -28,10 +48,11 @@ public:
   //
   // The symbolic analysis IS reused automatically. Each pole's factorization
   // splits into a symbolic phase that depends only on sparsity and a numeric
-  // phase that depends on the values; the symbolic phase is ~40% of prepare()
-  // at N~1700 and is identical for every pole and for every matrix with the
-  // same pattern. When a later prepare() is handed a matrix whose pattern
-  // matches the previous one, that phase is skipped.
+  // phase that depends on the values; the symbolic phase -- the fill-reducing
+  // ordering (see fill_ordering_internal.hpp) and SparseLU's analysis -- is
+  // roughly a third of prepare() at N~1700 and is identical for every pole and
+  // for every matrix with the same pattern. When a later prepare() is handed a
+  // matrix whose pattern matches the previous one, that phase is skipped.
   //
   // This is what makes the many-region workload affordable: a reactor model
   // with one burnup matrix per depletion region has the same chain topology
@@ -130,9 +151,12 @@ public:
   //
   // A prepared solver holds K complex LU factorizations at once — 8 for
   // CRAM16, 24 for CRAM48 — and each is larger than the matrix it came from,
-  // by the fill-in ratio. For a burnup matrix that ratio was measured at
-  // 2.2-2.5x and grows with N; for an acyclic decay-only matrix it is ~1.6x
-  // and flat. So the resident cost is roughly
+  // by the fill-in ratio, nnz(L+U) / nnz(A - theta*I). Under the block-
+  // triangular ordering the solver uses, that ratio was measured at 1.7-1.9x
+  // for the burnup benchmark shape (N = 256..1675) and 1.13x for the OpenMC
+  // simplified PWR chain; an acyclic decay-only matrix factorizes with no fill
+  // at all (1.4x, which is just L's unit diagonal). So the resident cost is
+  // roughly
   //
   //     K * fill * nnz(A) * sizeof(std::complex<double>)
   //
@@ -149,6 +173,9 @@ public:
 private:
   using cd = std::complex<double>;
   using StorageIndex = Eigen::SparseMatrix<cd>::StorageIndex;
+  // The pole matrices arrive already permuted by ordering_ (see
+  // fill_ordering_internal.hpp), so SparseLU must not reorder them again.
+  using PoleLU = Eigen::SparseLU<Eigen::SparseMatrix<cd>, internal::PresetOrdering<int>>;
 
   // Sparsity of the pole matrices from the last successful prepare(), kept so
   // the next one can tell whether the symbolic analysis still applies. Cheap
@@ -164,7 +191,10 @@ private:
   std::vector<StorageIndex> patternOuter_;
   std::vector<StorageIndex> patternInner_;
   // Written by beginPrepare(), read-only for the duration of the pole loop.
-  Eigen::SparseMatrix<cd> scaled_;  // A * dt, promoted to complex
+  Eigen::SparseMatrix<cd> scaled_;  // P * A * dt * P^T, promoted to complex
+  // The fill-reducing symmetric permutation P, recomputed with the symbolic
+  // analysis whenever the pattern changes and reused with it otherwise.
+  Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic, int> ordering_;
   bool preparing_ = false;
   bool reuseSymbolic_ = false;
   // One slot per pole so concurrent preparePole() calls never write the same
@@ -175,7 +205,7 @@ private:
   // One SparseLU per pole. We can't keep these in a std::vector of value
   // type because Eigen::SparseLU is non-copyable / non-movable in the
   // assignment sense we'd want — use unique_ptr to give us stable storage.
-  std::vector<std::unique_ptr<Eigen::SparseLU<Eigen::SparseMatrix<cd>>>> lus_;
+  std::vector<std::unique_ptr<PoleLU>> lus_;
   bool prepared_ = false;
 };
 

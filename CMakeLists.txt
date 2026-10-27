@@ -255,6 +255,7 @@ configure_file(
 add_library(cram
   cram/cram.cpp
   cram/cram_solver.cpp
+  cram/fill_ordering.cpp
   cram/burnup_matrix.cpp
   cram/reaction.cpp
   cram/integrator.cpp

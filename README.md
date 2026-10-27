@@ -21,6 +21,7 @@ cram/cram.hpp            CRAM solver interface
 cram/cram.cpp            IPF-CRAM-16 / CRAM-48
 cram/cram_poles.hpp      the verified CRAM16/CRAM48 coefficients and CramOrder (Eigen-free)
 cram/cram_solver.hpp     CramSolver: cached per-pole factorizations, reused symbolic analysis
+cram/fill_ordering.cpp   block-triangular + per-block COLAMD ordering of the pole matrices
 cram/burnup_matrix.cpp   matrix assembly (decay, fission source, reactions)
 cram/reaction.hpp        neutron reaction channels, products, OpenMC reaction names
 cram/integrator.hpp      time integrators (predictor, CE/CM, CE/LI, LE/QI, CF4)
