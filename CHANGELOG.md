@@ -5,6 +5,62 @@ the top-level `CMakeLists.txt` and CI refuses a tag that disagrees with it.
 Past 1.0 the major is the breaking-change axis, so a consumer that asked for
 `find_package(cram 2.0)` is satisfied by any 2.x.
 
+## Unreleased
+
+Changes marked **breaking** alter behaviour a 2.x consumer can observe, so
+releasing them means a major version.
+
+- **Breaking:** without ENDFtk, `loadDecayData` and `loadFissionYields` throw
+  `std::runtime_error` instead of returning 0, as the chain XML loaders already
+  did. The compile definition is renamed from `WITH_ENDFTK` to
+  `CRAM_WITH_ENDFTK`.
+- Fixed: ENDF fission yields of an isomeric parent (e.g. Am-242m1) were filed
+  under its ground state. The parent's state now comes from MF1/MT451; a
+  material without that header is refused.
+- **Breaking:** the chain XML reader throws on a malformed number, a
+  `<fission_yields>` table without an energy, or one whose products and data
+  differ in length, instead of guessing. Numbers are parsed independently of
+  the C locale. `parseNuclideName` accepts only the whole
+  `<symbol><mass>[_m<level>]` grammar.
+- **Breaking:** `DepletionChain::add` throws for a `Zai` its packed key cannot
+  hold (`Zai::representable()`: `0 <= i <= 9`, `1 <= a <= 999`, `z >= 0`), and
+  `Zai::operator==` compares fields rather than keys.
+- **Breaking:** `cramSolve`, `CramSolver::prepare` and the integrators throw
+  `std::invalid_argument` for a negative or non-finite time step
+  (`requireTimeStep()`).
+- **Breaking:** spontaneous and neutron-induced yields no longer stand in for
+  each other. Spontaneous fission uses only the table at energy 0
+  (`DepletionChain::spontaneousFissionYields()`), and `nearestYields()` only
+  tables at a non-zero energy. An SF mode whose parent has no SF table is
+  reported through a new out-parameter of `decayMatrix()`, or on stderr.
+- `DepletionChain::decayStencil()` and `reactionStencil()` state the matrix
+  entries of each process once. Matrix assembly, the interval-matrix structure
+  and both sensitivity contractions are built on them.
+  `decayConstantSensitivities()` now rejects an S that is the wrong size or
+  lacks a needed entry, as `reactionSensitivities()` did.
+- **Breaking:** `DepletionSystem` is neither copyable nor movable, since
+  `matrixBuilder()` binds its address. `intervalMatrices()` restores the
+  system's flux on return.
+- Faster: the CRAM pole matrices are factorized in block-triangular order
+  with COLAMD inside each block. At N = 1675 with CRAM48 this cuts
+  `CramSolver::prepare` from 31 to 16 ms (burnup shape) and from 19.5 to 9.3 ms
+  (decay-only), and the fill from 2.24x to 1.88x and from 1.70x to 1.40x.
+  `rateSensitivities()` shares one factorization between each forward
+  quadrature node and its mirror adjoint node through the new
+  `CramSolver::applyTranspose()`, halving its factorizations.
+- Validation: the OpenMC VERA replay compares every reported nuclide at every
+  step against a relative 1e-10 plus an absolute 1e-12 of the largest
+  inventory (it was 1e-3, at end of life only). New
+  `validation/openmc/generate_constant_power_refs.py` and
+  `VeraPinConstantPower` tests compare every integrator against OpenMC at
+  constant power. No reference data is committed yet, so those tests skip.
+- Build: FetchContent dependencies are fetched into each build tree again
+  (a shared `external/` let build trees overwrite each other's dependency
+  builds), and paths are project-scoped for `add_subdirectory` consumers.
+- Tests and CI: compile-fail tests that an omitted required field is
+  diagnosed (GCC/Clang); clang-tidy's bugprone and performance findings fail
+  the static-analysis job; actions are pinned to commits.
+
 ## 2.2.0
 
 Public CRAM coefficients, for callers that bring their own linear algebra.
