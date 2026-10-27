@@ -104,10 +104,11 @@ AdjointResult adjointDepleteIntegrated(const std::vector<Eigen::SparseMatrix<dou
                                        CramOrder order = CramOrder::CRAM48);
 
 // One burnup matrix per interval for a fixed-flux system: interval k is
-// assembled at flux[k]. The system must be in constant-flux mode (its flux is
-// overwritten by each interval's value and left at the last one); a
-// constant-power system throws std::invalid_argument, since its matrix depends
-// on the composition and no single A_k represents the interval.
+// assembled at flux[k]. The system must be in constant-flux mode, and its own
+// flux is unchanged on return (it is set to each interval's value in turn and
+// then restored); a constant-power system throws std::invalid_argument, since
+// its matrix depends on the composition and no single A_k represents the
+// interval.
 //
 // Every matrix carries a structural entry for every channel of the system --
 // including channels with a zero cross section, and every entry of a zero-flux

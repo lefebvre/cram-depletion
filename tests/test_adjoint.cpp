@@ -195,6 +195,20 @@ TEST(Adjoint, IntervalMatricesRefuseConstantPower) {
   EXPECT_THROW(intervalMatrices(sys, {1.0e14}), std::invalid_argument);
 }
 
+// Building the schedule sets each interval's flux in turn; the system must
+// come back describing the flux the caller had set, not the last interval's.
+TEST(Adjoint, IntervalMatricesRestoreTheCallersFlux) {
+  DepletionChain chain = buildPinChain();
+  DepletionSystem sys(chain);
+  configurePinReactions(sys);
+  sys.setConstantFlux(7.0e13);
+  const Eigen::VectorXd n = Eigen::VectorXd::Zero(chain.size());
+  const auto A = intervalMatrices(sys, {1.0e14, 0.0, 3.0e14});
+  EXPECT_EQ(A.size(), 3u);
+  EXPECT_EQ(sys.normalization(), DepletionSystem::Normalization::ConstantFlux);
+  EXPECT_EQ(sys.fluxFor(n), 7.0e13);
+}
+
 TEST(Adjoint, MismatchedScheduleIsRejected) {
   const CyclicChain c = buildCyclicChain(10);
   const std::vector<Eigen::SparseMatrix<double>> A = {c.A, c.A};
