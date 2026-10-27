@@ -284,6 +284,21 @@ TEST(Sensitivity, RejectsBadOptionsAndMismatchedInputs) {
       Eigen::SparseMatrix<double>(p.chain.size(), p.chain.size())};
   EXPECT_THROW(decayConstantSensitivities(p.chain, unstructured), std::invalid_argument);
   EXPECT_NO_THROW(decayConstantSensitivities(p.chain, S));
+
+  // The check holds per interval: an entry the other intervals carry must not
+  // hide its absence from one of them. Drop Xe-135's diagonal from the second
+  // S_k only; summing the S_k first would still have found it.
+  const int xe = p.chain.indexOf(kXe135);
+  std::vector<Eigen::Triplet<double>> kept;
+  for (Eigen::Index c = 0; c < S[1].outerSize(); ++c)
+    for (Eigen::SparseMatrix<double>::InnerIterator it(S[1], c); it; ++it)
+      if (it.row() != xe || it.col() != xe)
+        kept.emplace_back(static_cast<int>(it.row()), static_cast<int>(it.col()), it.value());
+  std::vector<Eigen::SparseMatrix<double>> holed = S;
+  holed[1].setZero();
+  holed[1].setFromTriplets(kept.begin(), kept.end());
+  ASSERT_EQ(holed[1].nonZeros() + 1, S[1].nonZeros());
+  EXPECT_THROW(decayConstantSensitivities(p.chain, holed), std::invalid_argument);
 }
 
 // A channel whose cross section is zero still has a derivative: raising it off

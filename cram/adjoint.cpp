@@ -482,25 +482,30 @@ Eigen::VectorXd decayConstantSensitivities(const DepletionChain& chain,
                                            const std::vector<Eigen::SparseMatrix<double>>& S) {
   requireChainSized(S, chain, "decayConstantSensitivities");
   Eigen::VectorXd out = Eigen::VectorXd::Zero(chain.size());
-  if (S.empty())
-    return out;
-  Eigen::SparseMatrix<double> total = S.front();
-  for (std::size_t k = 1; k < S.size(); ++k)
-    total = total + S[k];
 
   // dA/d(lambda_i) is exactly the column decayMatrix() scales by lambda_i.
+  // Each S_k is contracted on its own and the results summed -- the same value
+  // as contracting their sum, by linearity -- because the check has to hold
+  // per interval: summing first would let an entry present in one S_k hide
+  // its absence from another, and the integral that was never taken would
+  // count as zero.
   std::vector<std::pair<int, double>> column;
   for (int i = 0; i < chain.size(); ++i) {
     chain.decayStencil(i, column);
     if (column.empty())
       continue;  // no decay: lambda_i appears nowhere in A
-    const std::optional<double> s = contractColumn(total, i, mergeStencil(column));
-    if (!s)
-      throw std::invalid_argument(
-          "cram: decayConstantSensitivities: S has no entry for part of the decay of " +
-          chain.nuclides()[static_cast<std::size_t>(i)].str() +
-          ", so its derivative would be incomplete. " + kBuildWithIntervalMatrices);
-    out(i) = *s;
+    const std::unordered_map<int, double> gain = mergeStencil(column);
+    double s = 0.0;
+    for (const Eigen::SparseMatrix<double>& Sk : S) {
+      const std::optional<double> dA = contractColumn(Sk, i, gain);
+      if (!dA)
+        throw std::invalid_argument(
+            "cram: decayConstantSensitivities: S has no entry for part of the decay of " +
+            chain.nuclides()[static_cast<std::size_t>(i)].str() +
+            ", so its derivative would be incomplete. " + kBuildWithIntervalMatrices);
+      s += *dA;
+    }
+    out(i) = s;
   }
   return out;
 }
