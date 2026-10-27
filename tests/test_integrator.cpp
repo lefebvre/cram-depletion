@@ -137,9 +137,11 @@ TEST(Integrator, ConvergenceOrderMatchesScheme) {
   EXPECT_LT(eLeqi[2] * 50.0, ePred[2]) << "leqi vs predictor";
   EXPECT_LT(eCf4[2], eCecm[2]) << "cf4 most accurate";
 
-  // Every schedule above is uniform, and LE/QI's coefficients are functions of
-  // dt/dtl that reduce to CE/LI's at a ratio of 1 -- the whole reason the
-  // scheme is more than a copy of CE/LI goes unexercised past its first step.
+  // Every schedule above is uniform, so LE/QI's coefficients, which are
+  // functions of dt/dtl, are only ever evaluated at a ratio of 1. They do not
+  // reduce to CE/LI's there -- the corrector is still -A_{-1}/24 + A_0/2 +
+  // A_1/24 -- but the dependence on the ratio, the part of the scheme a
+  // varying schedule exercises, goes untested past the first step.
   // Refine a repeating [h, 4h] schedule instead: same total time, same
   // reference, and the ratio alternates 4 and 1/4 at every step.
   const auto pairedSchedule = [&](int pairs) {
