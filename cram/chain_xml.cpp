@@ -113,8 +113,13 @@ std::optional<double> parseDouble(std::string_view text) {
     text.remove_prefix(1);
   while (!text.empty() && (std::isspace(static_cast<unsigned char>(text.back())) != 0))
     text.remove_suffix(1);
-  if (!text.empty() && text.front() == '+')
+  if (!text.empty() && text.front() == '+') {
     text.remove_prefix(1);  // from_chars takes '-' but not '+'
+    // One sign only: without this, "+-0.5" would reach from_chars as "-0.5"
+    // and parse, where strtod rejects it.
+    if (!text.empty() && (text.front() == '-' || text.front() == '+'))
+      return std::nullopt;
+  }
   double value = 0.0;
   const auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), value);
   if (text.empty() || ec != std::errc() || ptr != text.data() + text.size())
