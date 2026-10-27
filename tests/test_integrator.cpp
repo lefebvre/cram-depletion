@@ -145,7 +145,7 @@ TEST(Integrator, ConvergenceOrderMatchesScheme) {
   const auto pairedSchedule = [&](int pairs) {
     const double h = T / (5.0 * pairs);
     std::vector<double> dts;
-    dts.reserve(static_cast<std::size_t>(2 * pairs));
+    dts.reserve(2 * static_cast<std::size_t>(pairs));
     for (int k = 0; k < pairs; ++k) {
       dts.push_back(h);
       dts.push_back(4.0 * h);

@@ -19,8 +19,9 @@ namespace cram {
 
 namespace internal {
 
-// The column ordering to give Eigen::SparseLU for a matrix that fillReducingOrder() (fill_ordering_internal.hpp)
-// has already permuted: it keeps the columns where they are. Not
+// The column ordering to give Eigen::SparseLU for a matrix that
+// fillReducingOrder() (fill_ordering_internal.hpp) has already permuted: it
+// keeps the columns where they are. Not
 // Eigen::NaturalOrdering, which does the same but hands SparseLU an *empty*
 // permutation -- and SparseLU applies its column elimination-tree postorder
 // only through a non-empty one, so with NaturalOrdering the postorder is

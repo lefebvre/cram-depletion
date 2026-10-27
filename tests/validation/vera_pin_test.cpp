@@ -97,8 +97,7 @@ int compareTrajectory(const VeraCase& c, const std::vector<Eigen::VectorXd>& ref
   ::testing::Test::RecordProperty(label + "_worst_nuclide", worstNuclide);
   text.str("");
   text << worstAbs;
-  ::testing::Test::RecordProperty(label + "_worst_error_relative_to_largest_inventory",
-                                  text.str());
+  ::testing::Test::RecordProperty(label + "_worst_error_relative_to_largest_inventory", text.str());
   return compared;
 }
 
@@ -228,8 +227,8 @@ TEST_P(VeraPinConstantPower, ReproducesOpenMCConstantPowerTrajectory) {
   for (const Eigen::VectorXd& n : traj)
     EXPECT_NEAR(sys.powerFor(n), ref->power, 1e-9 * ref->power) << scheme;
 
-  const int compared = compareTrajectory(c, ref->density, ref->reported, traj,
-                                         kConstantPowerRelTol, kConstantPowerAbsTol, scheme);
+  const int compared = compareTrajectory(c, ref->density, ref->reported, traj, kConstantPowerRelTol,
+                                         kConstantPowerAbsTol, scheme);
   EXPECT_GT(compared, 50 * c.steps) << scheme << ": the reference reports too few nuclides";
 }
 

@@ -285,6 +285,7 @@ std::vector<std::pair<double, double>> quadraturePieces(double dt, int sub, int 
   // A single piece is graded at both ends by treating it as two halves.
   const int n = (sub == 1 && levels > 0) ? 2 : sub;
   const double h = dt / n;
+  pieces.reserve(static_cast<std::size_t>(n));
   for (int p = 0; p < n; ++p)
     pieces.emplace_back(p * h, (p + 1) * h);
   if (levels == 0)

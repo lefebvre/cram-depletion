@@ -239,8 +239,7 @@ private:
 
   // `dropped` receives the number of decay daughters missing from the chain,
   // `untrackedSf` the number of spontaneous-fission modes with no SF table.
-  void decayTriplets(std::vector<Eigen::Triplet<double>>& t, int& dropped,
-                     int& untrackedSf) const;
+  void decayTriplets(std::vector<Eigen::Triplet<double>>& t, int& dropped, int& untrackedSf) const;
 
   static void warnDroppedDaughters(int dropped);
   static void warnUntrackedSpontaneousFission(int untracked);

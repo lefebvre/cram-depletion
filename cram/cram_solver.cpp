@@ -14,8 +14,7 @@ CramSolver::CramSolver(CramOrder order) : order_(order) {
   theta_.assign(poles.theta.begin(), poles.theta.end());
   alpha_.assign(poles.alpha.begin(), poles.alpha.end());
   lus_.resize(theta_.size());
-  std::generate(lus_.begin(), lus_.end(),
-                [] { return std::make_unique<PoleLU>(); });
+  std::generate(lus_.begin(), lus_.end(), [] { return std::make_unique<PoleLU>(); });
 }
 
 bool CramSolver::patternMatches(const Eigen::SparseMatrix<cd>& m) const {

@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -217,7 +218,7 @@ struct Options {
   std::string caseName = "vera_pin1a";
   fs::path out = "vera_report.json";
   double tolerance = 1e-10;  // the regression test's relative tolerance
-  int failOver = -1;  // >= 0 turns the tolerance into a gate
+  int failOver = -1;         // >= 0 turns the tolerance into a gate
 };
 
 [[noreturn]] void usage(int code) {
@@ -235,7 +236,9 @@ struct Options {
 
 }  // namespace
 
-int main(int argc, char** argv) {
+namespace {
+
+int run(int argc, char** argv) {
   Options opt;
   for (int i = 1; i < argc; ++i) {
     const auto need = [&](const char* what) {
@@ -455,4 +458,18 @@ int main(int argc, char** argv) {
     return 1;
   }
   return 0;
+}
+
+}  // namespace
+
+// The loaders, the XML reader and the number parsing all report bad input by
+// throwing; an exception escaping main() would end the process without saying
+// what was wrong with which file.
+int main(int argc, char** argv) {
+  try {
+    return run(argc, argv);
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "vera_report: %s\n", e.what());
+    return 1;
+  }
 }
