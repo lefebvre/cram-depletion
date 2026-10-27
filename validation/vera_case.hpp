@@ -90,6 +90,11 @@ struct VeraCase {
   std::vector<double> flux;  // per step (n/cm^2/s)
   std::unordered_map<cram::Zai, std::vector<cram::ReactionXS>, cram::ZaiHash> xs;
   std::vector<Eigen::VectorXd> refDensity;  // step 0..N
+  // Chain-indexed: whether density.csv carries the nuclide at all. OpenMC
+  // writes only the nuclides of its micro-xs set, so a zero in refDensity is
+  // either a reported zero -- which the engine must reproduce -- or a nuclide
+  // the reference says nothing about. This tells the two apart.
+  std::vector<char> reported;
   int steps = 0;
 
   double totalSeconds() const {
@@ -141,14 +146,17 @@ inline VeraCase loadVeraCase(const fs::path& root) {
 
   // density.csv: step,nuclide,atoms  (step 0..N)
   c.refDensity.assign(static_cast<std::size_t>(c.steps) + 1, Eigen::VectorXd::Zero(c.chain.size()));
+  c.reported.assign(static_cast<std::size_t>(c.chain.size()), 0);
   for (const auto& row : readCsv(root / "density.csv", 3)) {
     const int step = std::stoi(row[0]);
     const std::optional<Zai> z = parseNuclideName(row[1]);
     if (!z || step < 0 || step > c.steps)
       continue;
     const int idx = c.chain.indexOf(*z);
-    if (idx >= 0)
+    if (idx >= 0) {
       c.refDensity[static_cast<std::size_t>(step)](idx) = std::stod(row[2]);
+      c.reported[static_cast<std::size_t>(idx)] = 1;
+    }
   }
   return c;
 }

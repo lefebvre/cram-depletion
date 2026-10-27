@@ -216,7 +216,7 @@ struct Options {
   fs::path data = CRAM_VALIDATION_DATA_DIR;
   std::string caseName = "vera_pin1a";
   fs::path out = "vera_report.json";
-  double tolerance = 1e-3;
+  double tolerance = 1e-10;  // the regression test's relative tolerance
   int failOver = -1;  // >= 0 turns the tolerance into a gate
 };
 
@@ -228,7 +228,7 @@ struct Options {
                "  --data DIR                directory holding the case directories\n"
                "  --case NAME               case subdirectory (default vera_pin1a)\n"
                "  --out FILE                JSON output path (default vera_report.json)\n"
-               "  --tolerance X             reporting threshold on relative error (1e-3)\n"
+               "  --tolerance X             reporting threshold on relative error (1e-10)\n"
                "  --fail-over-tolerance N   exit 1 if more than N nuclides exceed it\n");
   std::exit(code);
 }

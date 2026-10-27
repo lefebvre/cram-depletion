@@ -327,10 +327,12 @@ OpenMC against the VERA depletion benchmark). Two layers, both transport-free:
    `CRAM_WITH_CHAIN_XML`). OpenMC runs a fixed-cross-section VERA pin depletion
    (ENDF/B-VIII.0, simplified CASL chain) with its predictor; given the same
    chain + one-group micro cross sections + flux, this engine's predictor march
-   reproduces OpenMC's number densities to **< 1e-3** for *every* nuclide the
-   reference reports as present at end of life — all 181 of case `vera_pin1a`,
-   not a curated subset, and the test asserts it nuclide by nuclide. The
-   measured worst is 4e-13, i.e. the two solves agree to round-off. This checks
+   reproduces OpenMC's number densities for *every* nuclide the reference
+   reports, at *every* step — not a curated subset, and not only end of life —
+   to a relative 1e-10 plus an absolute 1e-12 of the step's largest inventory,
+   and holds the nuclides the reference reports as zero to that same floor.
+   The measured worst is 1.1e-14 relative and 3.0e-15 absolute, i.e. the two
+   solves agree to round-off. This checks
    matrix assembly + CRAM,
    isolated from the transport / cross-section error a transport-free engine
    cannot reproduce. The committed reference data for case `vera_pin1a` lives
