@@ -39,6 +39,41 @@ include(GoogleTest)
 # failing before anything has been run.
 gtest_discover_tests(unit_tests TEST_PREFIX cram. DISCOVERY_MODE PRE_TEST)
 
+# Compile-fail tests for the structs whose required fields have no default
+# member initializer: compile_fail/missing_field.cpp explains the guarantee.
+# Each case builds one target from inside ctest and passes only if the build
+# reports -Wmissing-field-initializers (or Clang's designated-initializer
+# subgroup of it) -- matching the diagnostic, not just a failed exit code, so an
+# unrelated compile error cannot pass for one. The closing bracket is part of
+# the match because the flag alone also appears in the command line a failed
+# Ninja build echoes. The control build names every
+# field and must succeed, which keeps the snippet itself honest.
+#
+# GCC and Clang only: MSVC has no warning for an omitted aggregate member, so
+# on MSVC the guarantee does not hold at all and there is nothing to test.
+if(NOT MSVC)
+  set(_cram_missing_field_cases Zai DecayMode DecayData FissionYields ReactionXS ChainReaction)
+  add_executable(compile_fail_control EXCLUDE_FROM_ALL compile_fail/missing_field.cpp)
+  target_link_libraries(compile_fail_control PRIVATE cram)
+  target_compile_options(compile_fail_control PRIVATE -Werror=missing-field-initializers)
+  add_test(NAME cram.CompileFail.ControlBuilds
+           COMMAND ${CMAKE_COMMAND} --build ${PROJECT_BINARY_DIR} --target compile_fail_control
+                   --config $<CONFIG>)
+  set(_cram_omit 0)
+  foreach(_case IN LISTS _cram_missing_field_cases)
+    math(EXPR _cram_omit "${_cram_omit} + 1")
+    add_executable(compile_fail_${_case} EXCLUDE_FROM_ALL compile_fail/missing_field.cpp)
+    target_link_libraries(compile_fail_${_case} PRIVATE cram)
+    target_compile_definitions(compile_fail_${_case} PRIVATE CRAM_OMIT=${_cram_omit})
+    target_compile_options(compile_fail_${_case} PRIVATE -Werror=missing-field-initializers)
+    add_test(NAME cram.CompileFail.MissingFieldIn${_case}
+             COMMAND ${CMAKE_COMMAND} --build ${PROJECT_BINARY_DIR} --target compile_fail_${_case}
+                     --config $<CONFIG>)
+    set_tests_properties(cram.CompileFail.MissingFieldIn${_case} PROPERTIES
+      PASS_REGULAR_EXPRESSION "missing-(designated-)?field-initializers\]")
+  endforeach()
+endif()
+
 # Replays an OpenMC-generated VERA pin depletion (tests/validation/data) and
 # checks the engine reproduces OpenMC's number densities. Needs the chain
 # reader; SKIPs at run time when the data directory is absent. A separate

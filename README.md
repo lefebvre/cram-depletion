@@ -228,6 +228,7 @@ tests/test_sensitivity.cpp finite-difference checks of dR/dlambda and dR/dsigma
 tests/test_chain_xml.cpp OpenMC chain reader (CRAM_WITH_CHAIN_XML only)
 tests/validation/        replay of OpenMC-generated VERA pin data (CRAM_WITH_CHAIN_XML only)
 tests/integration/       real ENDFtk reader vs real ENDF data (CRAM_WITH_ENDFTK only)
+tests/compile_fail/      omitted required struct fields must not compile (GCC/Clang only)
 testing/depletion_pin_fixture.hpp  hand-built thermal-pin chain + one-group XS
 ```
 
