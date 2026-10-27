@@ -132,4 +132,24 @@ Eigen::VectorXd CramSolver::apply(const Eigen::VectorXd& n0) const {
   return y * alpha0_;
 }
 
+Eigen::VectorXd CramSolver::applyTranspose(const Eigen::VectorXd& n0) const {
+  if (!prepared_)
+    throw std::logic_error("cram: CramSolver::applyTranspose called before prepare");
+  if (n0.size() != n_)
+    throw std::invalid_argument(
+        "cram: CramSolver::applyTranspose n0.size() does not match prepared A");
+
+  Eigen::VectorXd y = n0;
+  for (std::size_t l = 0; l < theta_.size(); ++l) {
+    // transpose(), not adjoint(): theta_l is not conjugated in
+    // (A*dt - theta_l*I)^T = A^T*dt - theta_l*I.
+    auto& lu = *lus_[l];
+    Eigen::VectorXcd x = lu.transpose().solve(y.cast<cd>());
+    if (lu.info() != Eigen::Success)
+      throw std::runtime_error("cram: SparseLU solve failed in CramSolver::applyTranspose");
+    y += 2.0 * (alpha_[l] * x).real();
+  }
+  return y * alpha0_;
+}
+
 }  // namespace cram
