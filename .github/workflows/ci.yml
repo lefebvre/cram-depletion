@@ -8,7 +8,7 @@ jobs:
   format-check:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Install clang-format
         run: |
           sudo apt-get update
@@ -20,6 +20,7 @@ jobs:
             cram-apps/*.cpp \
             tests/*.hpp tests/*.cpp \
             tests/integration/*.cpp \
+            tests/compile_fail/*.cpp \
             tests/validation/*.cpp \
             testing/*.hpp \
             validation/*.hpp validation/report/*.cpp \
@@ -29,7 +30,7 @@ jobs:
     needs: format-check
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Install dependencies
         run: |
@@ -69,13 +70,13 @@ jobs:
                 --xml build/coverage-html/cobertura.xml
 
       - name: Upload coverage HTML
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: coverage-html
           path: build/coverage-html
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238  # v4.6.0
         with:
           files: build/coverage-html/cobertura.xml
           fail_ci_if_error: false
@@ -92,7 +93,7 @@ jobs:
     needs: format-check
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -119,7 +120,7 @@ jobs:
           print(f"\nFull report in the `validation-report` artifact.")
           PY
       - name: Upload validation report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: validation-report
           path: |
@@ -130,7 +131,7 @@ jobs:
     needs: format-check
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Configure (MSVC, FetchContent pulls Eigen + GTest)
         run: >
@@ -151,7 +152,7 @@ jobs:
       matrix:
         eigen_tag: ["3.4.0", "5.0.1"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Install dependencies (deliberately no libeigen3-dev)
         run: |
@@ -179,7 +180,7 @@ jobs:
     needs: format-check
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       # libeigen3-dev, not the fetch fallback: installing requires a system
       # Eigen, since a fetched one is a build-tree target that is never
@@ -240,7 +241,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Tag must match project(VERSION)
         run: |
           tag="${GITHUB_REF#refs/tags/v}"
@@ -260,7 +261,7 @@ jobs:
     needs: format-check
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -273,16 +274,19 @@ jobs:
           ctest --test-dir build --output-on-failure
 
   # ThreadSanitizer needs a build of its own -- it cannot be combined with the
-  # ASan/UBSan job above. The library is single-threaded today, so this job finds
-  # nothing; it exists so the guard is already in place before prepare() is
-  # parallelized. Note that TSan reports false positives against an
-  # uninstrumented OpenMP runtime and against libstdc++'s TBB-backed parallel
-  # algorithms, so concurrency here should be plain std::thread/std::async.
+  # ASan/UBSan job above. The library spawns no threads itself, but
+  # CramSolver::preparePole() is documented as safe to call concurrently for
+  # distinct poles, and CramSolver.ConcurrentPreparePoleMatchesSequential drives
+  # it from several std::threads; this job is what checks that contract for
+  # data races.
+  # Note that TSan reports false positives against an uninstrumented OpenMP
+  # runtime and against libstdc++'s TBB-backed parallel algorithms, so
+  # concurrency in tests should be plain std::thread/std::async.
   thread-sanitizer:
     needs: format-check
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -305,7 +309,7 @@ jobs:
     needs: format-check
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -324,7 +328,7 @@ jobs:
     needs: format-check
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -346,7 +350,7 @@ jobs:
     needs: format-check
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -367,7 +371,7 @@ jobs:
     needs: format-check
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Configure with ENDFtk reader (MSVC)
         run: >
