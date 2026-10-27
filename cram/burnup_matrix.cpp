@@ -200,39 +200,84 @@ void DepletionChain::decayTriplets(std::vector<Eigen::Triplet<double>>& t, int& 
   // lookup, but assembly is well under 1% of a region's total cost, so the
   // residual is ~0.1% overall -- not worth pinning the code to the reference
   // stability of an unordered_map. Determinism is the point of this walk.
+  std::vector<std::pair<int, double>> column;  // reused across nuclides
   for (const int i : decayOrder_) {
-    const Zai& parent = nuclides_[static_cast<std::size_t>(i)];
-    const DecayData& d = decay_.find(parent.key())->second;  // present by construction
+    const DecayData& d = decay_.find(nuclides_[static_cast<std::size_t>(i)].key())->second;
     if (d.decayConstant == 0.0)
       continue;
+    decayStencil(i, d, column, dropped, untrackedSf);
+    for (const auto& [j, c] : column)
+      t.emplace_back(j, i, d.decayConstant * c);
+  }
+}
 
-    t.emplace_back(i, i, -d.decayConstant);  // total removal of parent
+void DepletionChain::decayStencil(int i, const DecayData& d,
+                                  std::vector<std::pair<int, double>>& out, int& dropped,
+                                  int& untrackedSf) const {
+  out.clear();
+  if (d.decayConstant == 0.0)
+    return;
+  const Zai& parent = nuclides_[static_cast<std::size_t>(i)];
+  out.emplace_back(i, -1.0);  // total removal of parent
 
-    for (const auto& m : d.modes) {
-      double rate = d.decayConstant * m.branching;
-      if (rate == 0.0)
-        continue;
+  for (const auto& m : d.modes) {
+    if (m.branching == 0.0)
+      continue;
 
-      if (m.isFission) {
-        // Only the parent's own SF table. Substituting the nearest neutron-
-        // induced one would put a thermal fission's products where a
-        // spontaneous fission's belong, with nothing to say it happened.
-        if (const YieldEntry* entry = spontaneousFissionEntry(parent))
-          emitFissionProducts(t, i, *entry, rate);
-        else
-          ++untrackedSf;  // removed at `rate` above, nothing produced
-        continue;
+    if (m.isFission) {
+      // Only the parent's own SF table. Substituting the nearest neutron-
+      // induced one would put a thermal fission's products where a
+      // spontaneous fission's belong, with nothing to say it happened.
+      if (const YieldEntry* entry = spontaneousFissionEntry(parent)) {
+        // No index lookup and no validity check: addFissionYields() registered
+        // every product and recorded its index.
+        for (const auto& [j, yield] : entry->resolved)
+          out.emplace_back(j, m.branching * yield);
+      } else {
+        ++untrackedSf;  // removed with the rest of the decay, nothing produced
       }
-
-      const std::optional<Zai> daughter = decayDaughter(parent, m);
-      if (!daughter)
-        continue;  // RTYP encodes fission (e.g. 1.6): no single product
-      int j = indexOf(*daughter);
-      if (j >= 0)
-        t.emplace_back(j, i, rate);
-      else
-        ++dropped;  // unregistered daughter; surfaced below instead of silently lost
+      continue;
     }
+
+    const std::optional<Zai> daughter = decayDaughter(parent, m);
+    if (!daughter)
+      continue;  // RTYP encodes fission (e.g. 1.6): no single product
+    const int j = indexOf(*daughter);
+    if (j >= 0)
+      out.emplace_back(j, m.branching);
+    else
+      ++dropped;  // unregistered daughter; surfaced by decayMatrix() instead of silently lost
+  }
+}
+
+void DepletionChain::decayStencil(int index, std::vector<std::pair<int, double>>& out) const {
+  if (index < 0 || index >= size())
+    throw std::out_of_range("cram: DepletionChain::decayStencil index out of range");
+  out.clear();
+  const DecayData* d = decay(nuclides_[static_cast<std::size_t>(index)]);
+  if (d == nullptr)
+    return;
+  int dropped = 0;
+  int untrackedSf = 0;
+  decayStencil(index, *d, out, dropped, untrackedSf);
+}
+
+void DepletionChain::reactionStencil(const Zai& parent, bool isFission,
+                                     const std::optional<Zai>& target, double energy,
+                                     std::vector<std::pair<int, double>>& out) const {
+  out.clear();
+  const int p = indexOf(parent);
+  if (p < 0)
+    return;
+  out.emplace_back(p, -1.0);  // the parent is consumed whatever becomes of the product
+  if (isFission) {
+    if (const YieldEntry* entry = nearestEntry(parent, energy))
+      for (const auto& [j, yield] : entry->resolved)
+        out.emplace_back(j, yield);
+  } else if (target) {
+    const int j = indexOf(*target);
+    if (j >= 0)
+      out.emplace_back(j, 1.0);
   }
 }
 

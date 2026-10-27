@@ -267,6 +267,17 @@ TEST(Sensitivity, RejectsBadOptionsAndMismatchedInputs) {
                                    {.gaussPoints = 1, .subIntervals = 1, .endRefinements = 0});
   EXPECT_THROW(reactionSensitivities(p.system(), S, {1.0}), std::invalid_argument);
   EXPECT_THROW(sourceGenerator(p.A[0], Eigen::VectorXd::Zero(2)), std::invalid_argument);
+
+  // decayConstantSensitivities() reads S at the chain's indices, so an S for a
+  // different chain was an out-of-bounds read in a release build.
+  const std::vector<Eigen::SparseMatrix<double>> tooSmall = {
+      Eigen::SparseMatrix<double>(p.chain.size() - 1, p.chain.size() - 1)};
+  EXPECT_THROW(decayConstantSensitivities(p.chain, tooSmall), std::invalid_argument);
+  // Right size, no structure: every integral is one never taken, not a zero.
+  const std::vector<Eigen::SparseMatrix<double>> unstructured = {
+      Eigen::SparseMatrix<double>(p.chain.size(), p.chain.size())};
+  EXPECT_THROW(decayConstantSensitivities(p.chain, unstructured), std::invalid_argument);
+  EXPECT_NO_THROW(decayConstantSensitivities(p.chain, S));
 }
 
 // A channel whose cross section is zero still has a derivative: raising it off

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -192,25 +193,15 @@ namespace {
 std::vector<Eigen::Triplet<double>> channelPattern(const DepletionSystem& system) {
   const DepletionChain& chain = system.chain();
   std::vector<Eigen::Triplet<double>> t;
+  std::vector<std::pair<int, double>> column;
   for (const auto& [parent, rxns] : system.reactions()) {
     const int p = chain.indexOf(parent);
-    if (p < 0)
-      continue;
     for (const ReactionXS& r : rxns) {
-      t.emplace_back(p, p, 0.0);  // removal of the parent
-      if (r.type == ReactionType::Fission) {
-        if (const FissionYields* y = chain.nearestYields(parent, r.energy)) {
-          for (const auto& [product, yield] : y->products) {
-            const int j = chain.indexOf(product);
-            if (j >= 0)
-              t.emplace_back(j, p, 0.0);
-          }
-        }
-      } else if (r.target) {
-        const int j = chain.indexOf(*r.target);
-        if (j >= 0)
-          t.emplace_back(j, p, 0.0);
-      }
+      // The entries assemble() writes for this channel whenever its rate is
+      // not zero -- the same stencil, so the two cannot disagree.
+      chain.reactionStencil(parent, r.type == ReactionType::Fission, r.target, r.energy, column);
+      for (const auto& [j, c] : column)
+        t.emplace_back(j, p, 0.0);
     }
   }
   return t;
@@ -397,8 +388,61 @@ std::vector<Eigen::SparseMatrix<double>> rateSensitivities(
   return S;
 }
 
+namespace {
+
+// A stencil with its repeated rows merged, so that a product which is also the
+// parent nets against the removal instead of replacing it, and so the
+// contraction below can be a single walk of one column.
+std::unordered_map<int, double> mergeStencil(const std::vector<std::pair<int, double>>& stencil) {
+  std::unordered_map<int, double> gain;
+  for (const auto& [row, c] : stencil)
+    gain[row] += c;
+  return gain;
+}
+
+// sum over `gain` of coefficient * S(row, col), walking column `col` of S
+// once. Empty when S carries no entry for one of the rows. Reading them with
+// coeff() instead would report 0 for an entry S never integrated --
+// indistinguishable from one that integrated to zero -- and, since the removal
+// term is present either way, would hand back part of a derivative with no
+// sign left to trust.
+std::optional<double> contractColumn(const Eigen::SparseMatrix<double>& S, int col,
+                                     const std::unordered_map<int, double>& gain) {
+  double dA = 0.0;
+  std::size_t found = 0;
+  for (Eigen::SparseMatrix<double>::InnerIterator it(S, col); it; ++it) {
+    const auto g = gain.find(static_cast<int>(it.row()));
+    if (g == gain.end())
+      continue;
+    dA += g->second * it.value();
+    ++found;
+  }
+  if (found != gain.size())
+    return std::nullopt;
+  return dA;
+}
+
+void requireChainSized(const std::vector<Eigen::SparseMatrix<double>>& S,
+                       const DepletionChain& chain, const char* who) {
+  const bool wrongSize =
+      std::any_of(S.begin(), S.end(), [&chain](const Eigen::SparseMatrix<double>& Sk) {
+        return Sk.rows() != chain.size() || Sk.cols() != chain.size();
+      });
+  if (wrongSize)
+    throw std::invalid_argument(std::string("cram: ") + who +
+                                " needs each S_k sized like the chain");
+}
+
+constexpr const char* kBuildWithIntervalMatrices =
+    "S_k carries only the sparsity of the matrices it was built from; build them with "
+    "intervalMatrices(), which keeps a structural entry for every decay and every channel "
+    "of the system";
+
+}  // namespace
+
 Eigen::VectorXd decayConstantSensitivities(const DepletionChain& chain,
                                            const std::vector<Eigen::SparseMatrix<double>>& S) {
+  requireChainSized(S, chain, "decayConstantSensitivities");
   Eigen::VectorXd out = Eigen::VectorXd::Zero(chain.size());
   if (S.empty())
     return out;
@@ -406,61 +450,22 @@ Eigen::VectorXd decayConstantSensitivities(const DepletionChain& chain,
   for (std::size_t k = 1; k < S.size(); ++k)
     total = total + S[k];
 
+  // dA/d(lambda_i) is exactly the column decayMatrix() scales by lambda_i.
+  std::vector<std::pair<int, double>> column;
   for (int i = 0; i < chain.size(); ++i) {
-    const Zai& parent = chain.nuclides()[static_cast<std::size_t>(i)];
-    const DecayData* d = chain.decay(parent);
-    if (d == nullptr || d->decayConstant == 0.0)
-      continue;
-    double s = -total.coeff(i, i);
-    for (const DecayMode& m : d->modes) {
-      if (m.isFission) {
-        if (const FissionYields* y = chain.spontaneousFissionYields(parent))
-          for (const auto& [product, yield] : y->products)
-            s += m.branching * yield * total.coeff(chain.indexOf(product), i);
-        continue;
-      }
-      const std::optional<Zai> daughter = DepletionChain::decayDaughter(parent, m);
-      if (!daughter)
-        continue;
-      const int j = chain.indexOf(*daughter);
-      if (j >= 0)
-        s += m.branching * total.coeff(j, i);
-    }
-    out(i) = s;
+    chain.decayStencil(i, column);
+    if (column.empty())
+      continue;  // no decay: lambda_i appears nowhere in A
+    const std::optional<double> s = contractColumn(total, i, mergeStencil(column));
+    if (!s)
+      throw std::invalid_argument(
+          "cram: decayConstantSensitivities: S has no entry for part of the decay of " +
+          chain.nuclides()[static_cast<std::size_t>(i)].str() +
+          ", so its derivative would be incomplete. " + kBuildWithIntervalMatrices);
+    out(i) = *s;
   }
   return out;
 }
-
-namespace {
-
-// dA(row, p) / dsigma for every row one reaction channel of `parent` (at
-// matrix index p) touches: -1 for the parent's removal, +1 at a tracked
-// target, +yield at each product of the yield table the channel would use.
-//
-// Accumulated into one map rather than applied term by term so that a product
-// which is also the parent nets against the removal instead of replacing it,
-// and so the contraction below can be a single walk of one column.
-std::unordered_map<int, double> channelGain(const DepletionChain& chain, const Zai& parent, int p,
-                                            const ReactionXS& r) {
-  std::unordered_map<int, double> gain;
-  gain[p] -= 1.0;
-  if (r.type == ReactionType::Fission) {
-    if (const FissionYields* y = chain.nearestYields(parent, r.energy)) {
-      for (const auto& [product, yield] : y->products) {
-        const int j = chain.indexOf(product);
-        if (j >= 0)
-          gain[j] += yield;
-      }
-    }
-  } else if (r.target) {
-    const int j = chain.indexOf(*r.target);
-    if (j >= 0)
-      gain[j] += 1.0;
-  }
-  return gain;
-}
-
-}  // namespace
 
 std::vector<ReactionSensitivity> reactionSensitivities(
     const DepletionSystem& system, const std::vector<Eigen::SparseMatrix<double>>& S,
@@ -469,45 +474,29 @@ std::vector<ReactionSensitivity> reactionSensitivities(
     throw std::invalid_argument("cram: reactionSensitivities needs one flux per S_k");
   constexpr double kBarn = 1e-24;
   const DepletionChain& chain = system.chain();
-  const bool wrongSize =
-      std::any_of(S.begin(), S.end(), [&chain](const Eigen::SparseMatrix<double>& Sk) {
-        return Sk.rows() != chain.size() || Sk.cols() != chain.size();
-      });
-  if (wrongSize)
-    throw std::invalid_argument(
-        "cram: reactionSensitivities needs each S_k sized like the system's chain");
+  requireChainSized(S, chain, "reactionSensitivities");
 
   std::vector<ReactionSensitivity> out;
+  std::vector<std::pair<int, double>> column;
   for (const auto& [parent, rxns] : system.reactions()) {
     const int p = chain.indexOf(parent);
     for (const ReactionXS& r : rxns) {
       double s = 0.0;
       if (p >= 0) {
-        const std::unordered_map<int, double> gain = channelGain(chain, parent, p, r);
+        // dA/dsigma is flux * 1e-24 times the stencil assemble() scales by the
+        // reaction rate.
+        chain.reactionStencil(parent, r.type == ReactionType::Fission, r.target, r.energy, column);
+        const std::unordered_map<int, double> gain = mergeStencil(column);
         for (std::size_t k = 0; k < S.size(); ++k) {
-          // Walk column p once and pick out the rows this channel moves.
-          // Reading them with coeff() instead would report 0 for an entry S_k
-          // never integrated -- indistinguishable from one that integrated to
-          // zero -- and, since the removal term is applied either way, would
-          // hand back half a derivative with no sign left to trust.
-          double dA = 0.0;
-          std::size_t found = 0;
-          for (Eigen::SparseMatrix<double>::InnerIterator it(S[k], p); it; ++it) {
-            const auto g = gain.find(static_cast<int>(it.row()));
-            if (g == gain.end())
-              continue;
-            dA += g->second * it.value();
-            ++found;
-          }
-          if (found != gain.size())
+          const std::optional<double> dA = contractColumn(S[k], p, gain);
+          if (!dA)
             throw std::invalid_argument(
                 "cram: reactionSensitivities: S has no entry for part of the " +
                 std::string(reactionName(r.type)) + " channel of " + parent.str() +
-                ", so its derivative would be incomplete. S_k carries only the sparsity of "
-                "the matrices it was built from, and a channel with no rate on any interval "
-                "contributes none; build the interval matrices with intervalMatrices(), which "
-                "keeps a structural entry for every channel of the system");
-          s += flux[k] * kBarn * dA;
+                ", so its derivative would be incomplete; a channel with no rate on any "
+                "interval contributes no structure. " +
+                kBuildWithIntervalMatrices);
+          s += flux[k] * kBarn * *dA;
         }
       }
       out.push_back(
