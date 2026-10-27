@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <optional>
+
 #include "cram/reaction.hpp"
 
 using namespace cram;
@@ -25,9 +27,10 @@ TEST(Reaction, NamesRoundTrip) {
   for (ReactionType t :
        {ReactionType::Fission, ReactionType::NGamma, ReactionType::N2n, ReactionType::N3n,
         ReactionType::N4n, ReactionType::NAlpha, ReactionType::NProton}) {
-    const auto back = reactionTypeFromName(reactionName(t));
-    ASSERT_TRUE(back.has_value()) << reactionName(t);
-    EXPECT_EQ(*back, t);
+    // Compared as optionals, so an empty result fails here rather than being
+    // dereferenced after an ASSERT clang-tidy cannot see returning.
+    EXPECT_EQ(reactionTypeFromName(reactionName(t)), std::optional<ReactionType>(t))
+        << reactionName(t);
   }
 }
 
